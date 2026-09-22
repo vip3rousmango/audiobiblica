@@ -1,25 +1,19 @@
-// Electron main process — starts AudioBiblica backend + nanobot together
+// Electron main process — starts AudioBiblica backend and serves frontend
 const { app, BrowserWindow } = require('electron');
+const { join } = require('path');
 const { spawn } = require('child_process');
-const path = require('path');
 
 let mainWindow = null;
 let mcpServer = null;
-let nanobot = null;
 
 function startServices() {
   // Start FastAPI MCP server on localhost:8000
-  const backendDir = path.resolve(__dirname, '../..');
+  const backendDir = join(__dirname, '../..');
   mcpServer = spawn('python3', ['-m', 'uvicorn', 'src.backend.main:app', '--host', '127.0.0.1', '--port', '8000'], {
     cwd: backendDir,
     stdio: 'inherit',
   });
   mcpServer?.on('error', (e) => console.error('MCP server error:', e));
-
-  // Start nanobot CLI - using docker compose run for now (later can be bundled)
-  // For simplicity in this version, we assume Docker is available and nanobot repo is cloned at ../nanobot
-  // In production, we'd bundle nanobot binary or use npm package
-  console.log('Nanobot integration: skipping direct spawn for now (requires Docker setup)');
 }
 
 function createWindow() {
@@ -36,7 +30,7 @@ function createWindow() {
     mainWindow.loadURL('http://localhost:5173');
     mainWindow.webContents.openDevTools();
   } else {
-    mainWindow.loadFile(path.join(__dirname, 'dist/index.html'));
+    mainWindow.loadFile(join(__dirname, 'dist/index.html'));
   }
 }
 
@@ -50,6 +44,5 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   mcpServer?.kill();
-  nanobot?.kill();
   if (process.platform !== 'darwin') app.quit();
 });
