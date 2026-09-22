@@ -12,6 +12,17 @@ from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 
 from src.backend.models.equipment import Equipment
+from dataclasses import dataclass
+
+
+@dataclass
+class PDFProcessingResult:
+    """Result of PDF processing."""
+    text: str
+    features: Dict[str, Optional[str]]
+    equipment: Equipment
+
+
 
 
 class PDFProcessor:
@@ -23,7 +34,7 @@ class PDFProcessor:
         # Common patterns for extracting equipment specs from PDFs
         self.patterns = {
             "input_voltage": re.compile(
-                r"input\s*voltage[:=\s]*([\d\.\s]+[vV][a-zA-Z%]*)", re.IGNORECASE
+                r"input\s*voltage[:=\s]*([\d\.\s]+[vV][a-zA-Z%]*)",
             ),
             "output_voltage": re.compile(
                 r"output\s*voltage[:=\s]*([\d\.\s]+[vV][a-zA-Z%]*)", re.IGNORECASE
@@ -143,3 +154,4 @@ class PDFProcessor:
                     break
 
         return equipment
+pdf_processor = PDFProcessor()
