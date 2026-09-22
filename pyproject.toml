@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "audiobiblica"
+version = "0.1.0"
+description = "Audio equipment knowledge management system with PDF processing, manufacturer scraping, and MCP integration"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Professional :: Audio Engineers",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "black>=24.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+backend = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",
+    "pdfminer.six>=202x",
+    "PyPDF2>=3.0",
+    "faker>=29.0",
+]
+scrapers = [
+    "firecrawl-core>=0.27",
+]
+mcp = [
+    "mcppython>=0.17.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src.backend"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
