@@ -1,6 +1,6 @@
 """Main backend application entry point."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.backend.api.router import api_router
@@ -14,7 +14,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Audio equipment knowledge management system",
     )
-    
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -22,13 +22,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
-    app.include_router(api_router)
-    
+
+    app.include_router(api_router, prefix="/api/v1")
+
     return app
 
 
 app = create_app()
+mcp_server: AudioBiblicaMCPServer | None = None
 
 
 @app.on_event("startup")
@@ -49,6 +50,14 @@ async def shutdown_event():
 async def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+
+
+@app.get("/mcp")
+async def mcp_info():
+    """MCP server status endpoint."""
+    if mcp_server is None:
+        return {"mcp": {"status": "not_started"}}
+    return {"mcp": {"status": "ready"}}
 
 
 @app.get("/api/v1/equipment")
@@ -94,6 +103,12 @@ async def research_equipment(equipment_id: str):
 
 
 @app.post("/api/v1/mcp")
-async def mcp_endpoint():
-    """MCP endpoint for agent integration."""
-    return {"mcp": {"status": "ready"}}
+async def mcp_endpoint(request: Request):
+    """MCP endpoint for agent integration — receives tool_name and arguments."""
+    if mcp_server is None:
+        return {"error": "MCP server not initialized"}
+    body = await request.json()
+    tool_name = body.get("tool_name", "")
+    arguments = body.get("arguments", {})
+    response = await mcp_server.handle_request({"tool_name": tool_name, "arguments": arguments})
+    return response

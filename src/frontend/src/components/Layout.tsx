@@ -13,6 +13,7 @@ export default class Layout extends Component<Props> {
           <a href="/library">Library</a>
           <a href="/research">Research</a>
           <a href="/mcp">MCP Status</a>
+          <a href="/nanobot">Nanobot</a>
         </nav>
         <main>{this.props.children}</main>
       </div>
