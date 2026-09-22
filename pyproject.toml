@@ -16,6 +16,14 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pdfminer.six>=2022.11.1",
+    "PyPDF2>=3.0",
+    "pydantic>=2.0",
+]
+
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
@@ -24,33 +32,18 @@ dev = [
     "ruff>=0.4",
     "mypy>=1.10",
 ]
-backend = [
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.29",
-    "python-multipart>=0.0.9",
-    "pdfminer.six>=202x",
-    "PyPDF2>=3.0",
-    "faker>=29.0",
-]
 scrapers = [
     "firecrawl-core>=0.27",
 ]
 mcp = [
     "mcppython>=0.17.0",
 ]
+full = [
+    "audiobiblica[dev,scrapers,mcp]",
+]
+
+[project.scripts]
+audiobiblica = "src.backend.main:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src.backend"]
-
-[tool.black]
-line-length = 100
-target-version = ["py310"]
-
-[tool.ruff]
-target-version = "py310"
-line-length = 100
-
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
+packages = ["src/backend"]

@@ -1,50 +1,71 @@
-"""Equipment data models."""
+from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
-from datetime import datetime
-
-
-@dataclass
-class Manufacturer:
-    """Audio equipment manufacturer."""
-    name: str
-    website: Optional[str] = None
-    country: Optional[str] = None
-    founded: Optional[int] = None
-    specializations: List[str] = field(default_factory=list)
-
-
-@dataclass
-class EquipmentCategory:
-    """Category of audio equipment."""
-    name: str
-    description: str = ""
-    parent: Optional[str] = None  # For subcategories
+from typing import Optional
 
 
 @dataclass
 class Equipment:
-    """Single piece of audio equipment."""
+    """
+    Core equipment entity for AudioBiblica.
+
+    Attributes:
+        id: Unique identifier.
+        name: Human-readable equipment name.
+        category: Equipment category.
+        manufacturer: Manufacturer reference.
+        model: Model number or name.
+        description: Brief description.
+        specifications: Equipment specifications.
+        manuals: Associated manuals.
+        created_at: Creation timestamp.
+        updated_at: Last update timestamp.
+    """
+
     id: str
     name: str
-    manufacturer: str
-    model: str
     category: str
+    manufacturer: str
+    model: Optional[str] = None
     description: Optional[str] = None
-    specifications: Dict[str, Any] = field(default_factory=dict)
-    manuals: List[str] = field(default_factory=list)  # Paths to PDF files
-    resources: List[Dict[str, str]] = field(default_factory=list)  # URLs to online resources
-    last_updated: datetime = field(default_factory=datetime.now)
-    discovered_via_scrape: bool = False
+    specifications: dict = field(default_factory=dict)
+    manuals: list = field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass
+class EquipmentCategory:
+    """
+    Category for grouping equipment.
+    """
+
+    name: str
+    description: Optional[str] = None
+
+
+@dataclass
+class Manufacturer:
+    """
+    Manufacturer entity.
+    """
+
+    name: str
+    website: Optional[str] = None
+    country: Optional[str] = None
+    description: Optional[str] = None
 
 
 @dataclass
 class Manual:
-    """Documented manual for equipment."""
-    path: str
-    title: str
+    """
+    Manual entity representing a PDF or guide associated with equipment.
+    """
+
+    id: str
     equipment_id: str
-    extracted_text: Optional[str] = None
-    extracted_features: Dict[str, Any] = field(default_factory=dict)
-    processed_at: Optional[datetime] = None
+    title: str
+    url: str
+    source: str
+    downloaded_at: str = ""
+    metadata: dict = field(default_factory=dict)

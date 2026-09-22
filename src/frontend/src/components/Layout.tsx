@@ -1,33 +1,21 @@
-import React from "react";
-import { Link, useNavigate } from "react-router-dom";
+import React, { Component, ReactNode } from 'react';
 
-export const Layout = ({ children }: { children: React.ReactNode }) => {
-  const navigate = useNavigate();
+interface Props {
+  children?: ReactNode;
+}
 
-  return (
-    <div className="app-container">
-      <header className="app-header">
-        <nav className="main-nav">
-          <ul>
-            <li>
-              <Link to="/">Dashboard</Link>
-            </li>
-            <li>
-              <Link to="/equipment">Equipment Library</Link>
-            </li>
-            <li>
-              <Link to="/research">Research</Link>
-            </li>
-            <li>
-              <Link to="/mcp">MCP Status</Link>
-            </li>
-          </ul>
+export default class Layout extends Component<Props> {
+  render() {
+    return (
+      <div className="layout">
+        <nav>
+          <a href="/">Dashboard</a>
+          <a href="/library">Library</a>
+          <a href="/research">Research</a>
+          <a href="/mcp">MCP Status</a>
         </nav>
-      </header>
-
-      <main className="app-main">
-        {children}
-      </main>
-    </div>
-  );
-};
+        <main>{this.props.children}</main>
+      </div>
+    );
+  }
+}
