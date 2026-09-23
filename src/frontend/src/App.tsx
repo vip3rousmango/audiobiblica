@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import Layout from './components/Layout';
 import NanobotChat from './components/NanobotChat';
 
 const App: React.FC = () => {
