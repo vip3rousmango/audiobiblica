@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { getUpdateStatus, startUpdate, UpdateStatus } from './api';
+import { useCallback, useEffect, useState } from 'react';
+import { getHealth, getUpdateStatus, startUpdate, UpdateStatus } from './api';
 
 /* One place that knows how to ask for an update and wait for it to land.
    Two screens offer the button — the Overview notice and the health report — and
@@ -86,9 +86,23 @@ export function useUpdateRunner(options: {
           finish(`AudioBiblica is now running ${latest.current}.`, 'success');
         }
       } catch {
-        // The old app is gone and the new one is not answering yet. Keep waiting.
+        // The old app is gone and the new one is not answering yet — or it answered
+        // and does not know this endpoint. /health has existed for longer than
+        // anything else here, so ask that instead: a version change is all the
+        // confirmation needed to reload.
+        try {
+          const health = await getHealth();
+          if (stopped) return;
+          if (currentVersion && health.version && health.version !== currentVersion) {
+            window.location.reload();
+          }
+        } catch {
+          // Still nothing listening. Keep waiting.
+        }
       }
     };
+    // The interval lives exactly as long as the update does: no sleep loop to
+    // cancel by hand, and nothing left running once the swap is done.
     const timer = window.setInterval(() => { void poll(); }, POLL_MS);
     void poll();
     return () => {
@@ -97,11 +111,18 @@ export function useUpdateRunner(options: {
     };
   }, [updating, deadline, currentVersion, onMessage]);
 
-  const started = useRef(false);
+  /* Check on mount, then again whenever the tab comes back into view. A single
+     check is not enough: a page that was open while the app was restarting — or
+     that simply sat there for a week — would never hear about a new version, and
+     noticing is the whole point of the notice. Visibility is the cheap, honest
+     trigger: it is exactly when someone is looking at the app. */
   useEffect(() => {
-    if (started.current) return;
-    started.current = true;
     void refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, [refresh]);
 
   return { status, updating, refreshing, request, refresh };

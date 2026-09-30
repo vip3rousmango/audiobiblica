@@ -378,7 +378,10 @@ export interface UpdateStatus {
 }
 
 export async function getUpdateStatus(refresh = false): Promise<UpdateStatus> {
-  return request<UpdateStatus>(`/api/v1/update/status${refresh ? '?refresh=true' : ''}`);
+  // no-store on purpose: this reports the state of the world right now, and a
+  // cached copy is worse than no copy — a browser was seen reusing an old
+  // response for this URL and refusing to notice a new version because of it.
+  return request<UpdateStatus>(`/api/v1/update/status${refresh ? '?refresh=true' : ''}`, { cache: 'no-store' });
 }
 
 export async function startUpdate(target?: string): Promise<{ status: string; target: string | null }> {

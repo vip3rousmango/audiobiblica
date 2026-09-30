@@ -126,14 +126,30 @@ def mount_ui(application: FastAPI) -> None:
     if not (ui_dir / "index.html").is_file():
         return
     if (ui_dir / "assets").is_dir():
-        application.mount("/assets", StaticFiles(directory=ui_dir / "assets"), name="assets")
+        # Asset filenames carry a content hash, so they can be cached hard: the
+        # only way to reach new ones is a new index.html.
+        application.mount(
+            "/assets",
+            StaticFiles(directory=ui_dir / "assets"),
+            name="assets",
+        )
 
     @application.get("/{full_path:path}", include_in_schema=False)
     async def serve_ui(full_path: str) -> FileResponse:
+        # Anything under the API is not a page. Without this, an unknown API path
+        # answers with the app's HTML and a 200, which is how a browser ends up
+        # caching HTML where a script expects JSON — and how a typo in a route
+        # looks like a request that worked.
+        if full_path.startswith(("api/", "mcp/")) or full_path == "health":
+            raise HTTPException(status_code=404, detail="No such endpoint.")
+        # The page itself must be revalidated on every visit. Without this a
+        # browser keeps replaying a cached index.html, which keeps pointing at the
+        # previous bundle — so an app that has just updated itself still runs the
+        # old interface until the cache happens to expire.
         candidate = (ui_dir / full_path).resolve()
         if full_path and candidate.is_file() and candidate.is_relative_to(ui_dir):
-            return FileResponse(candidate)
-        return FileResponse(ui_dir / "index.html")
+            return FileResponse(candidate, headers={"Cache-Control": "no-cache"})
+        return FileResponse(ui_dir / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 
@@ -1238,13 +1254,14 @@ class UpdateRequest(BaseModel):
 
 
 @app.get("/api/v1/update/status")
-async def update_status(refresh: bool = False) -> dict:
+async def update_status(response: Response, refresh: bool = False) -> dict:
     """Which version is running, and whether a newer one is published.
 
     Never fails: an unreachable GitHub (or a machine that is simply offline) comes
     back as "nothing known", which the interface shows as "up to date" only when it
     actually knows the newest release.
     """
+    response.headers["Cache-Control"] = "no-store"
     return update_status_payload(await latest_release(force=refresh))
 
 

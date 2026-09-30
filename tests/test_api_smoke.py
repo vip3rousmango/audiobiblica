@@ -226,3 +226,32 @@ def test_assistant_prompt_includes_manual_text(client, equipment, monkeypatch):
     system_prompt = captured["messages"][0]["content"]
     assert "\n\n" in system_prompt
     assert "\\n" not in system_prompt
+
+
+def test_spa_fallback_refuses_api_paths(tmp_path, monkeypatch):
+    """Deep links still serve the app; API paths must not.
+
+    A 200 carrying index.html for an unknown API route is how a browser ends up
+    caching HTML where a script expects JSON, and how a typo in a route looks like
+    a request that worked. Found by watching a browser cache exactly that during an
+    update check.
+    """
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient as FreshClient
+
+    from src.backend.main import mount_ui
+
+    (tmp_path / "index.html").write_text("<html>AudioBiblica</html>", encoding="utf-8")
+    monkeypatch.setenv("AUDIOBIBLICA_UI_DIR", str(tmp_path))
+
+    application = FastAPI()
+    mount_ui(application)
+
+    with FreshClient(application) as fresh:
+        deep_link = fresh.get("/library")
+        assert deep_link.status_code == 200
+        assert deep_link.text.startswith("<html>")
+
+        unknown_api = fresh.get("/api/v1/nope")
+        assert unknown_api.status_code == 404
+        assert unknown_api.headers["content-type"].startswith("application/json")
