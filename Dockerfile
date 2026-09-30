@@ -10,7 +10,7 @@ COPY src/frontend ./
 RUN npm run build
 
 # Stage 2 -- runtime image: the API plus the built UI, on one port.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
