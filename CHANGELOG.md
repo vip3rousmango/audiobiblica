@@ -9,6 +9,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.1.3] - 2026-09-30
+
+### Fixed
+
+- **0.1.2 could lock you out of your own app when it runs in Docker.** Docker publishes the port
+  through its own forwarder, which rewrites the source address of every request that arrives to the
+  VM's gateway — so the new gate saw the machine's own browser as "not this computer" and answered
+  it with 401. A request whose host name is `localhost` or `127.0.0.1` is now accepted as coming
+  from this computer as well. A device reaching the machine by its network address still needs the
+  pairing link, which is the point of the gate: your browser opens the app, your phone pairs.
+  Found by booting the published image and asking it for `/health`, and `tests/test_mobile.py` now
+  covers both halves of it so it cannot come back quietly.
+
 ## [0.1.2] - 2026-09-30
 
 ### Added
@@ -126,7 +139,8 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.3...HEAD
+[0.1.3]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.3
 [0.1.2]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.2
 [0.1.1]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.0
