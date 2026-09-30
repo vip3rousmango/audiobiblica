@@ -9,6 +9,27 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.1.4] - 2026-09-30
+
+### Fixed
+
+- **A Docker install could not pair a phone.** The pairing link is built from the machine's address
+  on your network, and a container cannot see that: inside Docker the guess returns the container's
+  own address (`172.17.0.2`), which no phone can reach, so the code in **Settings → Mobile capture**
+  pointed at nowhere. `./scripts/audiobiblica` now works the address out on the machine and fills it
+  in, and refreshes it on every run — a laptop that moves between networks gets a link that still
+  works. Found by booting the published image and reading its own status, which is the habit that
+  caught the 0.1.2 lockout too.
+- When that address is missing — a copy started by hand with `docker compose up` rather than the
+  launcher — the panel now says so and names the two ways to fix it, instead of showing a code that
+  sends the phone into Docker's private network.
+
+### Added
+
+- `AUDIOBIBLICA_LAN_ADDRESS` and `AUDIOBIBLICA_PORT` are forwarded into the container, so the address
+  a phone is told to use can be set deliberately. An address in the environment always wins over the
+  one the launcher detects.
+
 ## [0.1.3] - 2026-09-30
 
 ### Fixed
@@ -139,7 +160,8 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.4
 [0.1.3]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.3
 [0.1.2]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.2
 [0.1.1]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.1
