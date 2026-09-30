@@ -28,7 +28,7 @@ python3 -m venv venv
 
 ```bash
 ./venv/bin/python3 -m uvicorn src.backend.main:app --host 127.0.0.1 --port 8000
-curl http://127.0.0.1:8000/health   # {"status":"ok"}
+curl http://127.0.0.1:8000/health   # {"status":"ok","version":"0.1.1"}
 ```
 
 ### Run the frontend
