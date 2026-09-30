@@ -4,39 +4,16 @@ Guards the whole HTTP surface: every route must answer its documented status for
 valid and invalid input, and none may return 500 for the inputs a client can send.
 Written after a missing module import silently 500'd several routes while the app
 still started and passed a syntax check.
+
+The shared client and the data paths come from conftest.py.
 """
 
 from __future__ import annotations
 
 import datetime
 import json
-import os
-import sys
-import tempfile
-from pathlib import Path
 
 import pytest
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-_TMP = Path(tempfile.mkdtemp(prefix="audiobiblica-tests-"))
-os.environ.setdefault("AUDIOBIBLICA_DB_PATH", str(_TMP / "app.db"))
-os.environ.setdefault("AUDIOBIBLICA_CONFIG_PATH", str(_TMP / "config.json"))
-os.environ.setdefault("AUDIOBIBLICA_MANUAL_DIR", str(_TMP / "manuals"))
-from fastapi.testclient import TestClient  # noqa: E402
-
-from src.backend.main import app  # noqa: E402
-
-
-@pytest.fixture(scope="module")
-def client():
-    # Routes are registered on the module-level app by decorators, and the MCP
-    # streamable-HTTP session manager can only be run once, so the suite shares
-    # one client with a single lifespan run.
-    with TestClient(app, base_url="http://127.0.0.1:8000") as test_client:
-        yield test_client
 
 
 @pytest.fixture()

@@ -1,0 +1,12 @@
+# Build from the checkout instead of pulling the published image.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#
+# Everything else — ports, volumes, the updater sidecar — comes from
+# docker-compose.yml, so what you run locally is the same shape as what a user
+# runs. Only the source of the image differs: this overlay builds it from the
+# working tree, which is also what CI does, so a broken build is caught before a
+# release rather than by whoever pulls it.
+services:
+  audiobiblica:
+    build: .

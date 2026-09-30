@@ -1,16 +1,31 @@
+# AudioBiblica — the file end users run.
+#
+# It uses the published image, so there is nothing to build on the machine that
+# runs it, and it cannot change unless someone edits this file. Developers build
+# from source with docker-compose.dev.yml instead (see docs/DEVELOPMENT.md), and
+# CI does the same.
+#
+# The project name is pinned on purpose. This file can be run from anywhere — the
+# launcher keeps a copy in ~/.audiobiblica/app — and a compose project named after
+# whatever directory it happened to live in would leave the user's existing
+# catalog volume behind.
+name: audiobiblica
+
 services:
   audiobiblica:
-    build: .
-    image: ghcr.io/vip3rousmango/audiobiblica:latest
+    image: ghcr.io/vip3rousmango/audiobiblica:${AUDIOBIBLICA_VERSION:-latest}
     ports:
       - "8000:8000"
     environment:
       AUDIOBIBLICA_DATA_DIR: /data
+      # Where the app leaves an update request and reads the updater's progress.
+      AUDIOBIBLICA_CONTROL_DIR: /control
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       NANOBOT_BASE_URL: ${NANOBOT_BASE_URL:-http://host.docker.internal:8900}
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
     volumes:
       - audiobiblica_data:/data
+      - audiobiblica_control:/control
     # Makes host.docker.internal resolve on Linux as well as macOS.
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -20,6 +35,36 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  # Applies updates on request, so the app does not have to hold the Docker socket
+  # itself. It runs the Docker CLI that ships in this image, nothing else, and the
+  # only thing it can do is pull the app image and recreate the app container.
+  updater:
+    image: docker:cli
+    # updater.sh sits beside this file in the launcher's own copy
+    # (~/.audiobiblica/app) and in scripts/ in a checkout. If it is genuinely
+    # missing, say so and idle rather than restart-looping — the app then reports,
+    # truthfully, that it cannot update itself.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        for candidate in /project/updater.sh /project/scripts/updater.sh; do
+          if [ -f "$$candidate" ]; then exec /bin/sh "$$candidate"; fi
+        done
+        echo "AudioBiblica updater: updater.sh is not in the mounted project directory, so self-updates are unavailable. Start the app with ./scripts/audiobiblica instead." >&2
+        while true; do sleep 3600; done
+    environment:
+      AUDIOBIBLICA_CONTROL_DIR: /control
+      AUDIOBIBLICA_PROJECT_DIR: /project
+      # Set AUDIOBIBLICA_VERSION in .env to pin a version: updates then stay off,
+      # which is the honest behaviour for a pinned install.
+      AUDIOBIBLICA_VERSION: ${AUDIOBIBLICA_VERSION:-latest}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - audiobiblica_control:/control
+      - ./:/project:ro
+    restart: unless-stopped
 
   # Optional: run Ollama in Docker instead of on the host.
   #   docker compose --profile ollama up -d
@@ -41,4 +86,5 @@ services:
 
 volumes:
   audiobiblica_data:
+  audiobiblica_control:
   ollama_models:

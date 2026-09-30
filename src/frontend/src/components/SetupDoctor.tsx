@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { createBackup, Diagnostics, getAssistantConfig, getDiagnostics, pullModel, sendAssistantChat } from '../lib/api';
+import { useUpdateRunner } from '../lib/useUpdate';
 import { Icon } from '../components/Icon';
 import { Button, InlineNotice, StatusDot } from '../components/ui';
 
@@ -23,6 +24,7 @@ interface SetupDoctorProps {
    nothing about what is wrong, it only renders the answer and wires the buttons. */
 const SetupDoctor: React.FC<SetupDoctorProps> = ({ onRestore, onOpenSection, onToast }) => {
   const [report, setReport] = useState<Diagnostics | null>(null);
+  const updater = useUpdateRunner({ currentVersion: report?.app_version, onMessage: onToast });
   const [loading, setLoading] = useState(false);
   const [pullModelName, setPullModelName] = useState('');
   const [explaining, setExplaining] = useState(false);
@@ -57,6 +59,8 @@ const SetupDoctor: React.FC<SetupDoctorProps> = ({ onRestore, onOpenSection, onT
     return () => window.clearInterval(timer);
   }, [pullModelName, report?.assistant.model_available, check]);
 
+  /* The update itself lives in a hook, because the Overview offers the same
+     button on a screen that has none of this report's state. */
   const runFix = async (fix: NonNullable<Diagnostics['checks'][number]['fix']>) => {
     setBusyFix(fix.kind + (fix.name ?? fix.model ?? ''));
     try {
@@ -72,9 +76,12 @@ const SetupDoctor: React.FC<SetupDoctorProps> = ({ onRestore, onOpenSection, onT
       }
       if (fix.kind === 'download_model' && fix.model) {
         await pullModel(fix.model);
-        setPullModelName(fix.model);
         onToast(`Downloading ${fix.model}. This can take a few minutes.`);
         await check();
+        return;
+      }
+      if (fix.kind === 'update') {
+        await updater.request();
         return;
       }
       if (fix.kind === 'open_settings' && fix.section) {
@@ -186,7 +193,7 @@ const SetupDoctor: React.FC<SetupDoctorProps> = ({ onRestore, onOpenSection, onT
                   <Button
                     size="sm"
                     variant={entry.level === 'fail' ? 'primary' : 'ghost'}
-                    disabled={busyFix !== '' || pullModelName !== ''}
+                    disabled={busyFix !== '' || pullModelName !== '' || updater.updating}
                     onClick={() => void runFix(entry.fix!)}
                   >
                     {entry.fix.label}
@@ -198,6 +205,12 @@ const SetupDoctor: React.FC<SetupDoctorProps> = ({ onRestore, onOpenSection, onT
 
           {pullModelName && !report.assistant.model_available && (
             <InlineNotice tone="info" icon="download">Downloading {pullModelName}. This page updates itself when it is ready.</InlineNotice>
+          )}
+
+          {updater.updating && (
+            <InlineNotice tone="info" icon="download">
+              Updating AudioBiblica. The app is downloading the new version and restarting itself; this page reloads on its own when the new version answers.
+            </InlineNotice>
           )}
 
           <div className="form-actions" style={{ marginBlockStart: 14 }}>

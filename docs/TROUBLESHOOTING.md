@@ -51,6 +51,38 @@ a laptop. If answers are still slow, set `ASSISTANT_NUM_CTX` to something smalle
 smaller model in **Settings → Assistant**; if they never finish at all, check that Ollama is running
 and raise `ASSISTANT_TIMEOUT` (seconds, default 180).
 
+## There is no update button
+
+**What you see:** the Overview has no update notice, or **Settings → Check my setup** says your
+version is current when you know a newer one exists.
+
+**Why:** three things can cause it. You really are on the newest version. The app could not reach
+GitHub to check (this is normal offline — the check is silent, never an error). Or this installation
+is not allowed to update itself: it is pinned to a version in a `.env` file, or it is running from
+source, where there is no updater container.
+
+**Fix:** look at the **Version** line in **Settings → Check my setup** — it says which of these it
+is, in the same sentence. A pinned install is pinned on purpose; remove `AUDIOBIBLICA_VERSION` from
+your `.env` file to receive updates again.
+
+## An update did not finish
+
+**What you see:** `The last update did not finish` on the Overview or in the health report, and the
+app is still running the old version.
+
+**Why:** the new version could not be downloaded (no internet, or a registry hiccup), or the new
+container did not start.
+
+**Fix:** run the start command again, which does the same work with the output visible:
+
+```bash
+./scripts/audiobiblica
+```
+
+Your catalog is untouched either way, and the copy taken before the update is still in `backups/`.
+If it keeps failing, `docker compose logs updater` (from `~/.audiobiblica/app`) shows what the
+updater tried.
+
 ## Something went wrong, but your catalog is safe
 
 **What you see:** `Something went wrong on our side. Your catalog is safe — try again.`

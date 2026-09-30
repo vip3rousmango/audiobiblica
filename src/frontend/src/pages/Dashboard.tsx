@@ -4,6 +4,7 @@ import { Equipment, getHealth, getSetupStatus, listEquipment, SetupStatus } from
 import { Icon } from '../components/Icon';
 import { Button, EmptyState, PageHeader, StatusDot, Surface } from '../components/ui';
 import SetupChecklist from '../components/SetupChecklist';
+import UpdateNotice from '../components/UpdateNotice';
 
 interface ServiceState {
   label: string;
@@ -18,6 +19,10 @@ const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  /* The version this page's own bundle belongs to. An update notice reloads the
+     page when the running app reports a different one, so the browser never keeps
+     executing yesterday's interface against today's backend. */
+  const [runningVersion, setRunningVersion] = useState<string | undefined>(undefined);
   const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
   const [error, setError] = useState('');
 
@@ -36,6 +41,7 @@ const Dashboard: React.FC = () => {
       setError('The catalog could not be reached. You can still explore the workspace and reconnect later.');
     }
     setApiOnline(healthResult.status === 'fulfilled' && healthResult.value.status === 'ok');
+    if (healthResult.status === 'fulfilled') setRunningVersion(healthResult.value.version);
     setSetupStatus(setupResult.status === 'fulfilled' ? setupResult.value : null);
     setLoading(false);
     setRefreshing(false);
@@ -70,6 +76,7 @@ const Dashboard: React.FC = () => {
         actions={<Button variant="primary" icon="plus" onClick={() => navigate('/library?new=1')}>Add equipment</Button>}
       />
 
+      <UpdateNotice currentVersion={runningVersion} />
       <SetupChecklist />
 
       {error && <div className="page-notice"><span>{error}</span><Button size="sm" variant="ghost" icon="refresh" onClick={() => void loadDashboard()}>Reconnect</Button></div>}

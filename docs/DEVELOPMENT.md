@@ -104,6 +104,47 @@ curl -s -X POST http://127.0.0.1:8000/mcp/ -H 'Content-Type: application/json' \
 
 **Wire protocol notes.** AudioBiblica sends exactly one `user` message per request and no `model`, because nanobot keeps the conversation itself keyed by `session_id`; a system prompt, when there is one, is folded into that user message. This is the one place the two sides have to agree, and `src/backend/services/assistant.py` documents it next to the code.
 
+### Updates (the updater sidecar)
+
+Updates are applied by a second container, not by the app. `docker-compose.yml`
+runs `docker:cli` with the Docker socket and the project directory mounted, and its
+`entrypoint` finds `scripts/updater.sh` (beside the compose file for end users, in
+`scripts/` for a checkout). It polls a control directory for a request and, when it
+finds one, runs `docker compose pull audiobiblica` followed by
+`docker compose up -d --no-deps audiobiblica` — the `--no-deps` and the named
+service matter: the updater must not recreate the container it is running in.
+
+The app never holds the socket. It writes and reads three files in that directory
+(shared as `/control`, `AUDIOBIBLICA_CONTROL_DIR`):
+
+| File | Written by | Contents |
+| --- | --- | --- |
+| `status.json` | updater | `state` (`idle` / `pulling` / `recreating` / `done` / `error`), a plain-language `message`, the target, timestamps, and a heartbeat refreshed every few seconds |
+| `request.json` | app | `{target, requested_at, current}` — written through a temporary file so the updater can never read a half-written request |
+| `request.running.json` | updater | the claimed request, moved here before any slow work so a restart cannot apply it twice |
+
+`src/backend/services/updater.py` owns the app's side: the release check (GitHub's
+releases API only, cached for six hours, silent when offline), version comparison,
+the guards, and the request. `GET /api/v1/update/status` and
+`POST /api/v1/update/start` are the API; the health report carries the same verdict
+as an `update` check, and the Overview shows the notice.
+
+The app treats a heartbeat older than 30 seconds as "the updater is gone" and says
+so, rather than offering a button that would do nothing. A pinned install
+(`AUDIOBIBLICA_VERSION` set) refuses to update itself and explains why.
+
+### Running from a checkout
+
+`docker-compose.yml` is the *user* file: it pulls the published image and does not
+build anything. To run your working tree, add the overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
+
+CI does the same, so a broken build is caught before a release rather than by
+whoever pulls it.
+
 ## Environment variables
 
 Every variable is read by the backend, except `VITE_API_BASE_URL`, which is read by the frontend at build time.

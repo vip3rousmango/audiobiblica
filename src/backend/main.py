@@ -52,6 +52,12 @@ from src.backend.services.paths import (
     replace_catalog_with,
 )
 from src.backend.services.storage import get_storage, invalidate_connections
+from src.backend.services.updater import (
+    cached_release,
+    latest_release,
+    request_update,
+    update_status_payload,
+)
 
 mcp_server = AudioBiblicaMCPServer()
 logger = logging.getLogger(__name__)
@@ -87,7 +93,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="AudioBiblica API",
-        version="0.1.0",
+        version="0.1.1",
         description="Audio equipment knowledge management system",
         lifespan=lifespan,
     )
@@ -1225,13 +1231,54 @@ def _catalog_counts(storage) -> dict | None:
         return None
 
 
+
+
+class UpdateRequest(BaseModel):
+    target: str | None = Field(default=None, max_length=40)
+
+
+@app.get("/api/v1/update/status")
+async def update_status(refresh: bool = False) -> dict:
+    """Which version is running, and whether a newer one is published.
+
+    Never fails: an unreachable GitHub (or a machine that is simply offline) comes
+    back as "nothing known", which the interface shows as "up to date" only when it
+    actually knows the newest release.
+    """
+    return update_status_payload(await latest_release(force=refresh))
+
+
+@app.post("/api/v1/update/start")
+async def start_update(payload: UpdateRequest | None = None) -> dict:
+    """Ask the updater container to install the newest release.
+
+    The app itself cannot pull an image or restart a container — it only writes a
+    request into the directory the updater watches.
+    """
+    status = update_status_payload(await latest_release())
+    if status["updater"]["in_progress"]:
+        raise HTTPException(status_code=409, detail="AudioBiblica is already updating. Watch this page.")
+    if not status["can_update"]:
+        raise HTTPException(status_code=409, detail=status["reason"] or "Updates are not available here.")
+    if not status["update_available"]:
+        raise HTTPException(status_code=409, detail="AudioBiblica is already up to date.")
+    # A snapshot first: the container is about to be replaced, and this is the last
+    # moment this process can save the catalog it is holding.
+    await run_in_threadpool(backup_database)
+    await run_in_threadpool(request_update, (payload.target if payload else None) or "latest")
+    return {"status": "requested", "target": status["latest"]}
+
+
 @app.get("/api/v1/diagnostics")
 async def diagnostics() -> dict:
     """The app's own health report: what is wrong and what can be done about it."""
     storage = get_storage()
     assistant = await _assistant_probe(_assistant_settings(), get_config())
+    # Cached only: a health report should not wait on GitHub. The interface asks
+    # /api/v1/update/status separately, and that one does fetch.
+    update = update_status_payload(cached_release())
     return await run_in_threadpool(
-        collect_diagnostics, _catalog_recovery, assistant, _catalog_counts(storage)
+        collect_diagnostics, _catalog_recovery, assistant, _catalog_counts(storage), update
     )
 
 

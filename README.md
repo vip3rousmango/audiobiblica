@@ -110,21 +110,43 @@ Both of these are optional. The app is genuinely useful without them.
 
 Without either one, adding devices, importing PDFs you own, and reading a manual from a link all still work.
 
-## Keeping it up to date
+## Updates look after themselves
+
+AudioBiblica checks for a newer version and, when there is one, says so **on the Overview** — one button, and it is done:
+
+```text
+   ┌──────────────────────────────────────────────────────────────┐
+   │  Version 0.1.2 is available (you are running 0.1.1).  [Update now] │
+   └──────────────────────────────────────────────────────────────┘
+```
+
+One click downloads the new version, replaces the app, and the page reloads itself into it. Your catalog is copied before anything is replaced, and the old version's copy stays in `backups/` — so an update is always something you can go back from.
+
+The same button is in **Settings → Check my setup**, along with everything else the app knows about its own health.
+
+**If you would rather update by hand**, running the start command again does exactly the same thing — it fetches the newest version and restarts:
 
 ```bash
-git pull
 ./scripts/audiobiblica
 ```
 
-Your catalog and manuals are untouched — the app is rebuilt around them. **Settings → Check my setup** afterwards will confirm everything is still healthy.
+You never need `git` for this. The command keeps its own copy of the two files it needs in `~/.audiobiblica/app`, refreshes them whenever it can, and only ever downloads a published version — nothing is built or compiled on your computer.
+
+**To pin a version** (and turn updates off), put `AUDIOBIBLICA_VERSION=0.1.1` in a `.env` file next to the app files; the app then tells you it is pinned instead of offering an update.
+
+### What updating actually does here
+
+Two containers run: the app, and a small one whose only job is updates. Only the second one can talk to Docker, and all it can do is download the published image and restart the app container — the app you see in the browser has no such power. The app asks it by writing a file, and reads back what it is doing, which is how the progress on screen is possible.
 
 ## Uninstalling
 
 ```bash
-docker compose down                   # stop the app
-docker volume rm audiobiblica_data    # delete the catalog, manuals and settings (permanent)
+cd ~/.audiobiblica/app                # where the app files live
+docker compose down                   # stop the app and the updater
+docker volume rm audiobiblica_audiobiblica_data audiobiblica_audiobiblica_control
 ```
+
+The first volume is your catalog, manuals and settings; deleting it is permanent.
 
 ## Something not working?
 
@@ -132,6 +154,8 @@ docker volume rm audiobiblica_data    # delete the catalog, manuals and settings
 - **It says the assistant's model is not installed.** Open **Settings → Assistant** and use the download button; it needs Ollama installed and running.
 - **Something looks wrong but you are not sure what.** Open **Settings → Check my setup** — it inspects the app, explains what it found in one sentence, and offers the fix where there is one.
 - **Web search does nothing.** That needs a Firecrawl key. Everything else works without one.
+- **The update button is missing.** Your version has nothing newer to install, or this install cannot update itself — open **Settings → Check my setup**, where the version line says which. A pinned install (`AUDIOBIBLICA_VERSION` in `.env`) never updates itself by design.
+- **An update did not finish.** Run `./scripts/audiobiblica`; it does the same work with the output visible.
 - **The first answer is slow.** The model has to load the first time. Later answers are quick; if every answer is slow, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 The complete list of messages and what to do about each is in [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).

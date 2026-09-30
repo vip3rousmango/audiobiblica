@@ -7,10 +7,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.1] - 2026-09-30
+
+### Added
+
+- AudioBiblica updates itself. It checks for a newer release, says so on the Overview, and installs
+  it from a single button: the new version is downloaded, the app is replaced, and the page reloads
+  into it. The catalog is copied first, so an update is always something you can go back from.
+- A small updater container is the only thing that can talk to Docker, and all it can do is pull the
+  published image and recreate the app container. The app itself holds no such power: it asks by
+  writing a request file and reads back the updater's progress.
+- `./scripts/audiobiblica` now works without git and is also the update path: it keeps its own copy
+  of the two files it needs under `~/.audiobiblica/app`, refreshes them, pulls the published image,
+  and starts. Nothing is built on the machine that runs it.
+- `AUDIOBIBLICA_VERSION` pins a version, and the app then reports that it is pinned instead of
+  offering an update.
+- The health report gained a **Version** check, and the README became a landing page: real
+  screenshots, plain language, developers at the end.
+
 ### Changed
 
-- The README is a landing page now: real screenshots, plain language, and the developer material
-  moved to the end behind a link.
+- `docker-compose.yml` runs the published multi-architecture image and no longer builds. Developers
+  (and CI) build from the checkout with `docker-compose.dev.yml`.
 
 ## [0.1.0] - 2026-09-30
 
@@ -75,5 +95,6 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.0

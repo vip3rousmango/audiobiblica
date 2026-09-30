@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# Start AudioBiblica and open it in the browser.
+# Start AudioBiblica, or update it, and open it in the browser.
 #
-# One command for a fresh machine: builds the app, starts it, waits until it
-# answers, then opens http://localhost:8000. Safe to run again at any time.
+# One command for everything the user does: the first run installs the app, and
+# every run after that is also how it updates. It keeps its own copy of the two
+# files it needs in ~/.audiobiblica/app, refreshes them when it can, pulls the
+# published image, and starts both containers. Nothing here needs git, and nothing
+# builds on the machine that runs it.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+STATE="${AUDIOBIBLICA_HOME:-$HOME/.audiobiblica}/app"
+SOURCE="${AUDIOBIBLICA_SOURCE:-https://raw.githubusercontent.com/vip3rousmango/audiobiblica/main}"
+COMPOSE_FILE="${STATE}/docker-compose.yml"
 
 DOCKER_HELP="AudioBiblica needs Docker Desktop once. Download it at https://www.docker.com/products/docker-desktop/ and run this command again."
 
@@ -19,23 +24,62 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "Starting AudioBiblica. The first run builds the app and can take a few minutes."
-docker compose up -d --build
+mkdir -p "$STATE"
+
+# A checkout beside this script is the fallback when there is no network.
+CHECKOUT="$(cd "$(dirname "$0")/.." && pwd)"
+fetch() {
+  name="$1"
+  if curl -fsSL --max-time 20 "${SOURCE}/${name}" -o "${STATE}/${name}.new" 2>/dev/null; then
+    mv "${STATE}/${name}.new" "${STATE}/${name}"
+    return 0
+  fi
+  rm -f "${STATE}/${name}.new"
+  return 1
+}
+
+echo "Checking for the newest version of the app files..."
+if ! fetch docker-compose.yml || ! fetch updater.sh; then
+  if [ -f "${CHECKOUT}/docker-compose.yml" ] && [ -f "${CHECKOUT}/scripts/updater.sh" ]; then
+    echo "Could not reach the internet, so using the copy in ${CHECKOUT}."
+    cp "${CHECKOUT}/docker-compose.yml" "$COMPOSE_FILE"
+    cp "${CHECKOUT}/scripts/updater.sh" "${STATE}/updater.sh"
+  elif [ -f "$COMPOSE_FILE" ]; then
+    echo "Could not reach the internet, so using the copy already in ${STATE}. Updating needs a connection."
+  else
+    echo "Could not reach the internet and there is no local copy to start from."
+    exit 1
+  fi
+fi
+
+compose() {
+  docker compose -f "$COMPOSE_FILE" --project-directory "$STATE" "$@"
+}
+
+if [ "${AUDIOBIBLICA_VERSION:-latest}" = "latest" ]; then
+  echo "Downloading the newest AudioBiblica..."
+  compose pull -q audiobiblica 2>/dev/null || echo "Could not download a new version; starting what is already installed."
+fi
+
+echo "Starting AudioBiblica. The first run takes a few minutes."
+compose up -d
 
 echo "Waiting for AudioBiblica to be ready..."
-for _ in $(seq 1 60); do
-  if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
-    echo "AudioBiblica is running. Opening http://localhost:8000"
+for _ in $(seq 1 90); do
+  if health="$(curl -fsS http://localhost:8000/health 2>/dev/null)"; then
+    version="$(printf '%s' "$health" | sed -n 's/.*"version"[: ]*"\([^"]*\)".*/\1/p')"
+    echo "AudioBiblica ${version:-}is running. Opening http://localhost:8000"
     if command -v open >/dev/null 2>&1; then
       open http://localhost:8000
     elif command -v xdg-open >/dev/null 2>&1; then
       xdg-open http://localhost:8000
     fi
+    echo "It can also update itself from inside the app: Settings → Check my setup, or the notice on the Overview."
     exit 0
   fi
   sleep 2
 done
 
-echo "AudioBiblica did not start within two minutes. The last log lines were:"
-docker compose logs --tail 40 audiobiblica
+echo "AudioBiblica did not start within three minutes. The last log lines were:"
+compose logs --tail 40 audiobiblica
 exit 1

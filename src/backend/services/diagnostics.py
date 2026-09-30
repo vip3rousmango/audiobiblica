@@ -65,6 +65,64 @@ def _missing_manual_files() -> Optional[int]:
         return None
 
 
+def _update_check(update: Optional[dict]) -> dict:
+    """Say which version is running, and offer the update when it can be applied."""
+    if not update:
+        return {
+            "id": "update",
+            "level": "ok",
+            "title": "Version",
+            "detail": "AudioBiblica has not checked for a newer version yet. Open this screen from a connected machine, or use the Update notice on the Overview.",
+            "fix": None,
+        }
+    updater = update.get("updater") or {}
+    if updater.get("failed"):
+        return {
+            "id": "update",
+            "level": "fail",
+            "title": "The last update did not finish",
+            "detail": f"{updater.get('message') or 'The update stopped part way.'} AudioBiblica is still running version {update['current']}. Run ./scripts/audiobiblica to try again.",
+            "fix": None,
+        }
+    if updater.get("in_progress"):
+        return {
+            "id": "update",
+            "level": "warn",
+            "title": f"Updating to {updater.get('target') or 'the newest version'}",
+            "detail": updater.get("message") or "AudioBiblica is downloading and restarting. This page will reload itself.",
+            "fix": None,
+        }
+    if not update.get("update_available"):
+        latest = update.get("latest")
+        return {
+            "id": "update",
+            "level": "ok",
+            "title": "Up to date",
+            "detail": (
+                f"You are running version {update['current']}, the newest published version."
+                if latest
+                else f"You are running version {update['current']}. No newer version is known (this check needs an internet connection)."
+            ),
+            "fix": None,
+        }
+    latest = update.get("latest")
+    if update.get("can_update"):
+        return {
+            "id": "update",
+            "level": "warn",
+            "title": f"Version {latest} is available",
+            "detail": f"You are running {update['current']}. Updating takes about a minute; your catalog is copied first and the app restarts itself.",
+            "fix": {"kind": "update", "label": f"Update to {latest}"},
+        }
+    return {
+        "id": "update",
+        "level": "warn",
+        "title": f"Version {latest} is available",
+        "detail": f"You are running {update['current']}. {update.get('reason') or ''}",
+        "fix": None,
+    }
+
+
 def _catalog_check(state: str) -> dict:
     if state == "ok":
         return {
@@ -209,7 +267,9 @@ def _manual_files_check(missing: Optional[int]) -> dict:
     }
 
 
-def collect_diagnostics(recovery: Optional[dict], assistant: dict, counts: Optional[dict]) -> dict:
+def collect_diagnostics(
+    recovery: Optional[dict], assistant: dict, counts: Optional[dict], update: Optional[dict] = None
+) -> dict:
     """Everything needed to explain what is wrong, in one JSON object.
 
     The caller already knows the assistant state and the catalog counts, so they
@@ -225,6 +285,7 @@ def collect_diagnostics(recovery: Optional[dict], assistant: dict, counts: Optio
         _assistant_runtime_check(assistant),
         _assistant_model_check(assistant),
         _manual_files_check(_missing_manual_files()),
+        _update_check(update),
     ]
     config = get_config()
     return {

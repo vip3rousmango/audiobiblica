@@ -68,10 +68,10 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Build the bundle
-        run: docker compose build
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml build
 
       - name: Start the bundle
-        run: docker compose up -d
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --scale updater=0
 
       - name: Wait for health
         run: |
@@ -83,7 +83,7 @@ jobs:
             sleep 2
           done
           echo "::error::the bundle did not become healthy within 60s"
-          docker compose logs audiobiblica
+          docker compose -f docker-compose.yml -f docker-compose.dev.yml logs audiobiblica
           exit 1
 
       - name: Assert the UI is served from the same port
@@ -97,4 +97,4 @@ jobs:
 
       - name: Tear down
         if: always()
-        run: docker compose down -v
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v

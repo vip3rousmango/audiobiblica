@@ -38,6 +38,9 @@ export interface ResearchFinding {
 
 export interface HealthResponse {
   status: string;
+  /** The running version. The interface compares it after an update to know when
+      to reload into the new bundle. */
+  version?: string;
 }
 
 export interface McpResponse {
@@ -302,7 +305,7 @@ export async function createBackup(): Promise<{ backup: BackupEntry | null }> {
    everything else is wording the backend chose, so the interface never has to
    invent a fix for a problem it did not diagnose. */
 interface DiagnosticFix {
-  kind: 'restore' | 'backup_now' | 'open_settings' | 'download_model';
+  kind: 'restore' | 'backup_now' | 'open_settings' | 'download_model' | 'update';
   label: string;
   name?: string;
   model?: string;
@@ -348,6 +351,38 @@ export async function getDiagnostics(): Promise<Diagnostics> {
 
 export async function clearAssistantCredential(runtime: 'builtin' | 'nanobot'): Promise<void> {
   await request(`/api/v1/config/assistant/credentials/${runtime}`, { method: 'DELETE' });
+}
+
+/* Where the app's own update stands. `can_update` is false when the updater
+   container is absent (a source run) or the install is pinned to a version, and
+   `reason` then says why, in words that go straight to the screen. */
+export interface UpdateStatus {
+  current: string;
+  latest: string | null;
+  update_available: boolean;
+  release_url: string | null;
+  published_at: string | null;
+  pinned_version: string | null;
+  can_update: boolean;
+  reason: string | null;
+  updater: {
+    alive: boolean;
+    state: 'idle' | 'pulling' | 'recreating' | 'done' | 'error' | 'absent';
+    message: string;
+    target: string | null;
+    started_at: string | null;
+    finished_at: string | null;
+    in_progress: boolean;
+    failed: boolean;
+  };
+}
+
+export async function getUpdateStatus(refresh = false): Promise<UpdateStatus> {
+  return request<UpdateStatus>(`/api/v1/update/status${refresh ? '?refresh=true' : ''}`);
+}
+
+export async function startUpdate(target?: string): Promise<{ status: string; target: string | null }> {
+  return request('/api/v1/update/start', { method: 'POST', body: JSON.stringify({ target: target ?? null }) });
 }
 
 export async function listAssistantModels(): Promise<{ models: string[]; provider: string; runtime: string }> {
