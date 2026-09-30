@@ -566,3 +566,4 @@ p { line-height: 1.62; }
 .mobile-url { padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--teal); font-family: var(--font-mono); font-size: .62rem; word-break: break-all; user-select: all; }
 .mobile-reader { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .link-button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+.inline-notice code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); font-family: var(--font-mono); font-size: .92em; color: var(--text-soft); }

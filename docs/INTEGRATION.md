@@ -87,12 +87,21 @@ GET  http://<host>:8000/capture?t=<token>         # presents the token once…
 {
   "enabled": true,
   "address": "10.0.0.50",
+  "address_source": "override",                     // "override" | "guessed"
+  "in_container": false,
   "url": "http://10.0.0.50:8000/capture?t=JEoV…",   // null when the machine has no network
   "token_set": true,
   "port": 8000,
   "vision": { "model": "qwen2.5vl:7b", "installed": true, "models": ["qwen2.5vl:7b", "llama3.2:3b"] }
 }
 ```
+
+`address` is the address a **phone** should use, not the address this request arrived on, and
+`address_source` says where it came from: `override` when `AUDIOBIBLICA_LAN_ADDRESS` set it, `guessed`
+when the app worked it out from the routing table. `in_container` is true inside Docker. The
+combination `in_container && address_source == "guessed"` means the app is reporting the container's
+own address, which no phone can reach — the interface refuses to show a pairing code in that state,
+and so should anything you build on this endpoint.
 
 A non-loopback caller may present the token three ways: `?t=<token>` on any request, the
 `audiobiblica_mobile` cookie, or (recommended for a server-to-server bridge) the query parameter on

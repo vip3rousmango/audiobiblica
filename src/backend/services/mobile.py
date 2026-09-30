@@ -20,6 +20,7 @@ import os
 import re
 import secrets
 import socket
+from pathlib import Path
 from typing import Optional
 
 from src.backend.config import get_config
@@ -111,14 +112,32 @@ def is_local_host(host_header: Optional[str]) -> bool:
         return False
 
 
+def lan_address_override() -> Optional[str]:
+    """The address the operator pinned, or ``None`` to work it out."""
+    return (os.getenv("AUDIOBIBLICA_LAN_ADDRESS") or "").strip() or None
+
+
+def in_container() -> bool:
+    """Whether this process is running inside a container.
+
+    Docker drops this file into every container it starts, and nothing else does.
+    It matters here because a container cannot see the machine's address on your
+    network: the guess below returns the container's own address, which no phone
+    can reach.
+    """
+    return Path("/.dockerenv").exists()
+
+
 def lan_address() -> Optional[str]:
-    """This machine's address on the local network, or ``None`` when it has none.
+    """The address a phone should use to reach this app, or ``None`` when there is none.
 
     ``AUDIOBIBLICA_LAN_ADDRESS`` overrides the guess for machines with several
     interfaces (docker bridges, VPNs) where the route picked is not the one the
-    phone can reach.
+    phone can reach — and it is the only way to get this right in a container,
+    which is why the installer writes it and the interface says so when it is
+    missing.
     """
-    override = (os.getenv("AUDIOBIBLICA_LAN_ADDRESS") or "").strip()
+    override = lan_address_override()
     if override:
         return override
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

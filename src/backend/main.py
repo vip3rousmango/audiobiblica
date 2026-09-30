@@ -51,9 +51,11 @@ from src.backend.services.mobile import (
     MOBILE_COOKIE,
     allowed_origin_regex,
     capture_url,
+    in_container,
     is_local_host,
     is_loopback,
     lan_address,
+    lan_address_override,
     mobile_port,
     mobile_token,
     regenerate_mobile_token,
@@ -1024,9 +1026,14 @@ async def mobile_status() -> dict:
     model = vision_model()
     models = await _local_models(settings) or []
     token = mobile_token()
+    # `address_source` is what lets the interface say "this cannot work yet"
+    # instead of showing a code that points at the container's own address: in a
+    # container the guess is always wrong, and only the override is right.
     return {
         "enabled": bool(token),
         "address": lan_address(),
+        "address_source": "override" if lan_address_override() else "guessed",
+        "in_container": in_container(),
         "url": capture_url(),
         "token_set": bool(token),
         "port": mobile_port(),

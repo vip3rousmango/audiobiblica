@@ -23,6 +23,13 @@ services:
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       NANOBOT_BASE_URL: ${NANOBOT_BASE_URL:-http://host.docker.internal:8900}
       FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      # The address a phone should use to reach this app. A container cannot work
+      # it out — it only sees its own address inside Docker — so the launcher fills
+      # this in from the machine's network, and Settings → Mobile capture says so
+      # when it is missing.
+      AUDIOBIBLICA_LAN_ADDRESS: ${AUDIOBIBLICA_LAN_ADDRESS:-}
+      # The port quoted in the pairing link, when it is not the published default.
+      AUDIOBIBLICA_PORT: ${AUDIOBIBLICA_PORT:-8000}
     volumes:
       - audiobiblica_data:/data
       - audiobiblica_control:/control

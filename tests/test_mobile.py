@@ -131,3 +131,24 @@ def test_loopback_treats_a_missing_address_as_this_machine():
     assert is_loopback("::1") is True
     assert is_loopback("192.168.65.1") is False
     assert is_loopback("localhost") is False, "a name in a client field is not a guarantee"
+
+
+def test_mobile_status_says_where_the_pairing_address_came_from(client, monkeypatch):
+    """Settings shows a code only when the address was chosen, never when it was guessed.
+
+    Inside a container the guess returns the container's own address, which no phone
+    can reach — so the interface needs to be told the difference, or it offers a code
+    that fails for a reason nobody can see.
+    """
+    monkeypatch.setenv("AUDIOBIBLICA_LAN_ADDRESS", "192.168.7.7")
+    chosen = client.get("/api/v1/mobile/status").json()
+    assert chosen["address"] == "192.168.7.7"
+    assert chosen["address_source"] == "override"
+    assert "192.168.7.7:8000/capture?t=" in chosen["url"]
+
+    monkeypatch.delenv("AUDIOBIBLICA_LAN_ADDRESS")
+    guessed = client.get("/api/v1/mobile/status").json()
+    assert guessed["address_source"] == "guessed"
+    # A bool either way: the suite runs on a machine here, but inside a container
+    # this is True and that is what the interface keys off.
+    assert isinstance(guessed["in_container"], bool)

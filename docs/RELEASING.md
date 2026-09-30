@@ -115,8 +115,15 @@ curl -s 'http://localhost:8000/api/v1/update/status?refresh=true' | python3 -m j
 ```
 
 Reload the Overview and the notice is there. (Nothing in the interface passes `refresh=true` yet, so
-without this the newest release can take up to six hours to appear. A "Check again" button is on the
-roadmap for 0.1.3.)
+without this the newest release can take up to six hours to appear — which is why a **Check again**
+button is the first item in 0.1.4.)
+
+> **The in-app updater pulls the image; it does not refresh `docker-compose.yml`.** That file lives in
+> `~/.audiobiblica/app` and is replaced only by `./scripts/audiobiblica`. So a release that changes the
+> compose file — a new environment variable, a new volume, a changed port — reaches existing installs
+> only when the user runs the launcher once, and the release notes have to say so plainly. 0.1.4 is
+> the first such release: it forwards `AUDIOBIBLICA_LAN_ADDRESS` into the container, so the phone
+> pairing link can be built from the machine's address rather than the container's.
 
 If the button is missing: the install is pinned (`AUDIOBIBLICA_VERSION` in `.env` — by design, see
 the README), the updater sidecar is not running (`docker ps` should list `audiobiblica-updater-1`),

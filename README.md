@@ -137,6 +137,10 @@ first time), so **the photos are never uploaded anywhere**. They stay attached t
 produced, and the only way in is the link in the QR code: anyone on your wifi with that link can add
 gear, so press **New link** in Settings if you ever want to cut them off.
 
+If the panel instead says there is no code to scan yet, the app is running in Docker and cannot see
+your computer's address on the network — run `./scripts/audiobiblica` once and it fills it in. (It
+does that on every run, so a laptop that moves between wifi networks keeps working.)
+
 ## Updates look after themselves
 
 AudioBiblica checks for a newer version and, when there is one, says so **on the Overview** — one button, and it is done:

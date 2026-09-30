@@ -42,6 +42,10 @@ export interface GearDraft {
 export interface MobileStatus {
   enabled: boolean;
   address: string | null;
+  /* "override" when the address was configured, "guessed" otherwise. In a
+     container a guess is always wrong: it names the container, not the machine. */
+  address_source: 'override' | 'guessed';
+  in_container: boolean;
   url: string | null;
   token_set: boolean;
   port: number;

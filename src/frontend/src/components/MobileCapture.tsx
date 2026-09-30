@@ -89,6 +89,13 @@ const MobileCapture: React.FC<MobileCaptureProps> = ({ onToast }) => {
     );
   }
 
+  /* Two reasons there may be nothing to scan: no network at all, or a container
+     that cannot see the machine's address. Both are said plainly instead of
+     showing a code that cannot work. */
+  const hasNetwork = Boolean(status && status.address !== null);
+  const addressIsUsable = !(status?.in_container && status.address_source === 'guessed');
+  const canPair = hasNetwork && addressIsUsable;
+
   return (
     <section className="settings-section" aria-labelledby="mobile-heading">
       <div className="settings-section-header">
@@ -99,15 +106,27 @@ const MobileCapture: React.FC<MobileCaptureProps> = ({ onToast }) => {
       </div>
 
       <div className="mobile-panel">
-        <InlineNotice tone="info">
-          Anyone on this wifi who has the link below can open the capture page and add gear to your
-          catalog. Make a new link if that ever needs to stop.
-        </InlineNotice>
+        {canPair && (
+          <InlineNotice tone="info">
+            Anyone on this wifi who has the link below can open the capture page and add gear to your
+            catalog. Make a new link if that ever needs to stop.
+          </InlineNotice>
+        )}
 
-        {status && status.address === null ? (
+        {!hasNetwork ? (
           <InlineNotice tone="warning">
             This computer is not on a network, so a phone has nothing to connect to. Join a wifi
             network and open this page again.
+          </InlineNotice>
+        ) : !addressIsUsable ? (
+          /* A container cannot see the machine's address on your network, so the
+             only honest thing to show is the reason and the fix — not a code
+             that sends the phone to an address inside Docker. */
+          <InlineNotice tone="warning">
+            This copy of AudioBiblica runs in Docker, which cannot see your computer's address on
+            the network, so there is no code to scan yet. Run <code>./scripts/audiobiblica</code> on
+            this computer — it fills the address in for you — or set{' '}
+            <code>AUDIOBIBLICA_LAN_ADDRESS</code> next to the app, then reload this page.
           </InlineNotice>
         ) : (
           <div className="mobile-qr">

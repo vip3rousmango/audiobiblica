@@ -56,6 +56,36 @@ compose() {
   docker compose -f "$COMPOSE_FILE" --project-directory "$STATE" "$@"
 }
 
+# The address a phone should use to reach this app. A container cannot work this
+# out — inside Docker it only sees its own address — so it is filled in here,
+# from the machine, and refreshed on every run: a laptop that moves between
+# networks gets a new address, and a pairing link pointing at the old one would
+# fail silently.
+detect_lan_address() {
+  if command -v ipconfig >/dev/null 2>&1; then
+    iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2}')"
+    [ -n "${iface:-}" ] && ipconfig getifaddr "$iface" 2>/dev/null && return 0
+  fi
+  if command -v ip >/dev/null 2>&1; then
+    ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' && return 0
+  fi
+  hostname -I 2>/dev/null | awk '{print $1}'
+}
+
+refresh_lan_address() {
+  [ -n "${AUDIOBIBLICA_LAN_ADDRESS:-}" ] && return 0   # an explicit choice wins
+  address="$(detect_lan_address || true)"
+  [ -z "${address:-}" ] && return 0
+  env_file="${STATE}/.env"
+  touch "$env_file"
+  grep -v '^AUDIOBIBLICA_LAN_ADDRESS=' "$env_file" >"${env_file}.tmp" 2>/dev/null || true
+  printf 'AUDIOBIBLICA_LAN_ADDRESS=%s\n' "$address" >>"${env_file}.tmp"
+  mv "${env_file}.tmp" "$env_file"
+  echo "Phones on this network reach the app at http://${address}:8000 (Settings → Mobile capture)."
+}
+
+refresh_lan_address
+
 if [ "${AUDIOBIBLICA_VERSION:-latest}" = "latest" ]; then
   echo "Downloading the newest AudioBiblica..."
   compose pull -q audiobiblica 2>/dev/null || echo "Could not download a new version; starting what is already installed."
