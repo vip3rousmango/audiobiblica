@@ -27,6 +27,7 @@ _TMP = Path(tempfile.mkdtemp(prefix="audiobiblica-tests-"))
 os.environ.setdefault("AUDIOBIBLICA_DB_PATH", str(_TMP / "app.db"))
 os.environ.setdefault("AUDIOBIBLICA_CONFIG_PATH", str(_TMP / "config.json"))
 os.environ.setdefault("AUDIOBIBLICA_MANUAL_DIR", str(_TMP / "manuals"))
+os.environ.setdefault("AUDIOBIBLICA_PHOTO_DIR", str(_TMP / "photos"))
 
 
 @pytest.fixture(scope="session")
@@ -35,7 +36,9 @@ def client():
 
     from src.backend.main import app
 
-    with TestClient(app, base_url="http://127.0.0.1:8000") as test_client:
+    # The client address matters: the app only trusts loopback without a pairing
+    # token, and the test client's default address is not loopback.
+    with TestClient(app, base_url="http://127.0.0.1:8000", client=("127.0.0.1", 51234)) as test_client:
         yield test_client
 
 

@@ -32,6 +32,9 @@ class Equipment:
     manuals: list = field(default_factory=list)
     research_findings: list = field(default_factory=list)
     archived: bool = False
+    #: ``None`` for an ordinary record and ``"draft"`` for one captured from a
+    #: photo that the user has not looked at yet.
+    review_state: Optional[str] = None
     created_at: str = ""
     updated_at: str = ""
 

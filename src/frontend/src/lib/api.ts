@@ -9,8 +9,43 @@ export interface Equipment {
   manuals?: Manual[];
   research_findings?: ResearchFinding[];
   archived?: boolean;
+  /* "draft" until the user confirms a device captured from a photo. */
+  review_state?: 'draft' | 'reviewed' | null;
+  photos?: EquipmentPhoto[];
   created_at?: string;
   updated_at?: string;
+}
+
+export interface EquipmentPhoto {
+  id: string;
+  file_name: string;
+  url: string;
+  byte_size?: number;
+  content_type?: string;
+  created_at?: string;
+}
+
+/* One device the local vision model believes it saw in a photo; the fields are
+   editable on the capture page before anything is added to the catalog. */
+export interface GearDraft {
+  name: string;
+  manufacturer: string;
+  model: string | null;
+  category: string;
+  description: string | null;
+  confidence: number | null;
+  photo_id: string | null;
+  /* Set when the catalog already holds what looks like the same device. */
+  existing_id: string | null;
+}
+
+export interface MobileStatus {
+  enabled: boolean;
+  address: string | null;
+  url: string | null;
+  token_set: boolean;
+  port: number;
+  vision: { model: string; installed: boolean; models: string[] };
 }
 
 export interface Manual {
@@ -218,6 +253,12 @@ export function friendlyMessage(status: number | undefined, technical: string): 
   if (/model .* not found/i.test(technical)) {
     return "The assistant's model isn't installed yet. Open Settings and pick a model from the list.";
   }
+  if (status === 401) {
+    return 'This device is not paired with the catalog. On the computer, open Settings → Mobile capture and scan the code again.';
+  }
+  if (status === 409 && /not installed/i.test(technical)) {
+    return 'No photo reader is installed yet. On the computer, open Settings → Mobile capture and download one.';
+  }
   if (/did not answer in time|timed out/i.test(technical)) {
     return 'The assistant is still thinking. The first answer after a download can take a minute.';
   }
@@ -420,7 +461,17 @@ export async function listEquipment(): Promise<Equipment[]> {
   return payload.equipment ?? [];
 }
 
-export async function createEquipment(input: Omit<Equipment, 'id' | 'manuals'>): Promise<Equipment> {
+/* What a caller may send when writing a device. `photo_ids` is not a column:
+   it names the captured photos to attach to the device being written. */
+export interface EquipmentInput extends Partial<Omit<Equipment, 'id' | 'manuals' | 'photos'>> {
+  name: string;
+  manufacturer: string;
+  category: string;
+  review_state?: 'draft' | 'reviewed' | null;
+  photo_ids?: string[];
+}
+
+export async function createEquipment(input: EquipmentInput): Promise<Equipment> {
   const payload = await request<{ equipment: Equipment }>('/api/v1/equipment', {
     method: 'POST',
     body: JSON.stringify(input),
@@ -428,7 +479,7 @@ export async function createEquipment(input: Omit<Equipment, 'id' | 'manuals'>):
   return payload.equipment;
 }
 
-export async function updateEquipment(equipmentId: string, input: Partial<Equipment>): Promise<Equipment> {
+export async function updateEquipment(equipmentId: string, input: Partial<EquipmentInput>): Promise<Equipment> {
   const payload = await request<{ equipment: Equipment }>(`/api/v1/equipment/${encodeURIComponent(equipmentId)}`, {
     method: 'PUT',
     body: JSON.stringify(input),
@@ -472,6 +523,53 @@ export async function startResearch(
   return request<ManufacturerSearchResponse>(`/api/v1/equipment/${encodeURIComponent(equipmentId)}/research`, {
     method: 'POST',
     body: JSON.stringify({ query_type: queryType }),
+  });
+}
+
+/* --- Capturing gear from a phone photo -------------------------------------
+   The photo goes up first and is then read where it already is: no bytes leave
+   the machine for the reading, and the page never waits on a cloud service. */
+
+export async function uploadCapturePhoto(file: Blob, fileName = 'photo.jpg'): Promise<EquipmentPhoto> {
+  const body = new FormData();
+  body.append('file', file, fileName);
+  const payload = await request<{ photo: EquipmentPhoto }>('/api/v1/capture/photos', {
+    method: 'POST',
+    body,
+  });
+  return payload.photo;
+}
+
+export async function readCapturePhoto(photoId: string, mode: 'item' | 'studio'): Promise<GearDraft[]> {
+  const payload = await request<{ drafts?: GearDraft[] }>('/api/v1/capture/read', {
+    method: 'POST',
+    body: JSON.stringify({ photo_id: photoId, mode }),
+  });
+  return payload.drafts ?? [];
+}
+
+export async function deletePhoto(photoId: string): Promise<void> {
+  await request<void>(`/api/v1/photos/${encodeURIComponent(photoId)}`, { method: 'DELETE' });
+}
+
+export async function getMobileStatus(): Promise<MobileStatus> {
+  return request<MobileStatus>('/api/v1/mobile/status');
+}
+
+export async function regenerateMobileToken(): Promise<{ url: string | null; token: string }> {
+  return request('/api/v1/mobile/token', { method: 'POST' });
+}
+
+/* One request for the whole selection: a phone tidying a studio capture should
+   not have to send a dozen of them over wifi. */
+export async function batchUpdateEquipment(
+  ids: string[],
+  changes: Record<string, unknown> = {},
+  remove = false,
+): Promise<{ updated: number; deleted: number }> {
+  return request('/api/v1/equipment/batch', {
+    method: 'POST',
+    body: JSON.stringify({ ids, changes, delete: remove }),
   });
 }
 

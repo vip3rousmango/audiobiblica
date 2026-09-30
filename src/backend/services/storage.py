@@ -29,6 +29,17 @@ def _iso(timestamp: float | int | str | None) -> str:
         return str(timestamp)
 
 @dataclass
+class StoredPhoto:
+    id: str
+    equipment_id: Optional[str]
+    file_path: str
+    file_name: str
+    content_type: str
+    byte_size: int
+    created_at: float
+
+
+@dataclass
 class StoredEquipment:
     id: str
     name: str
@@ -174,6 +185,20 @@ class Storage:
                     content_text TEXT NOT NULL,
                     FOREIGN KEY (manual_id) REFERENCES manuals(id) ON DELETE CASCADE
                 );
+
+                -- equipment_id is NULL until a photo is attached to the device it
+                -- produced: a photo is uploaded, read, and only then claimed.
+                CREATE TABLE IF NOT EXISTS equipment_photos (
+                    id TEXT PRIMARY KEY,
+                    equipment_id TEXT REFERENCES equipment(id) ON DELETE CASCADE,
+                    file_path TEXT NOT NULL,
+                    file_name TEXT NOT NULL,
+                    content_type TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL,
+                    created_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_equipment_photos_equipment ON equipment_photos(equipment_id);
                 """
             )
             equipment_columns = {
@@ -187,6 +212,8 @@ class Storage:
                 conn.execute(
                     "ALTER TABLE equipment ADD COLUMN research_findings_json TEXT NOT NULL DEFAULT '[]'"
                 )
+            if "review_state" not in equipment_columns:
+                conn.execute("ALTER TABLE equipment ADD COLUMN review_state TEXT")
             conn.commit()
         finally:
             conn.close()
@@ -215,6 +242,7 @@ class Storage:
             manuals=json.loads(row["manuals_json"] or "[]"),
             research_findings=json.loads(row["research_findings_json"] or "[]") if "research_findings_json" in keys else [],
             archived=bool(row["archived"]) if "archived" in keys else False,
+            review_state=row["review_state"] if "review_state" in keys else None,
             created_at=_iso(row["created_at"]),
             updated_at=_iso(row["updated_at"]),
         )
@@ -260,8 +288,8 @@ class Storage:
         with self.transaction() as conn:
             conn.execute(
                 """
-                INSERT INTO equipment (id, name, category, manufacturer, model, description, specifications, manuals_json, research_findings_json, archived, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO equipment (id, name, category, manufacturer, model, description, specifications, manuals_json, research_findings_json, archived, review_state, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     equipment.id,
@@ -274,6 +302,7 @@ class Storage:
                     json.dumps([asdict(m) if hasattr(m, "__dataclass_fields__") else m for m in equipment.manuals]),
                     json.dumps(equipment.research_findings),
                     int(equipment.archived),
+                    equipment.review_state,
                     now,
                     now,
                 ),
@@ -289,7 +318,7 @@ class Storage:
                 UPDATE equipment
                 SET name = ?, category = ?, manufacturer = ?, model = ?, description = ?,
                     specifications = ?, manuals_json = ?, research_findings_json = ?,
-                    archived = ?, updated_at = ?
+                    archived = ?, review_state = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -302,6 +331,7 @@ class Storage:
                     json.dumps([asdict(m) if hasattr(m, "__dataclass_fields__") else m for m in equipment.manuals]),
                     json.dumps(equipment.research_findings),
                     int(equipment.archived),
+                    equipment.review_state,
                     now,
                     equipment.id,
                 ),
@@ -416,6 +446,112 @@ class Storage:
                 (equipment_id,),
             ).fetchall()
             return [row["file_path"] for row in rows]
+
+
+    def save_photo(
+        self,
+        photo_id: str,
+        file_path: str,
+        file_name: str,
+        content_type: str,
+        byte_size: int,
+    ) -> None:
+        """Record an uploaded photo. It has no owner until it is attached."""
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO equipment_photos
+                    (id, equipment_id, file_path, file_name, content_type, byte_size, created_at)
+                VALUES (?, NULL, ?, ?, ?, ?, ?)
+                """,
+                (photo_id, file_path, file_name, content_type, byte_size, time.time()),
+            )
+
+    def get_photo(self, photo_id: str) -> Optional[StoredPhoto]:
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT * FROM equipment_photos WHERE id = ?", (photo_id,)
+            ).fetchone()
+            return StoredPhoto(**dict(row)) if row else None
+
+    def list_photos(self, equipment_id: str) -> list[StoredPhoto]:
+        with self.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM equipment_photos
+                WHERE equipment_id = ?
+                ORDER BY created_at DESC
+                """,
+                (equipment_id,),
+            ).fetchall()
+            return [StoredPhoto(**dict(row)) for row in rows]
+
+    def attach_photos(self, equipment_id: str, photo_ids: list[str]) -> int:
+        """Claim unattached photos for a device. Returns how many were claimed.
+
+        A photo already owned by this same device is left as it is, so a retried
+        create does not look like a failure; a photo owned by another device is
+        not stolen, which is what makes the caller's rowcount check meaningful.
+        """
+        if not photo_ids:
+            return 0
+        placeholders = ", ".join("?" for _ in photo_ids)
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                f"""
+                UPDATE equipment_photos SET equipment_id = ?
+                WHERE id IN ({placeholders})
+                  AND (equipment_id IS NULL OR equipment_id = ?)
+                """,
+                (equipment_id, *photo_ids, equipment_id),
+            )
+            return cursor.rowcount
+
+    def delete_photo(self, photo_id: str) -> Optional[str]:
+        """Forget a photo. Returns the file path whose row was removed."""
+        with self.transaction() as conn:
+            row = conn.execute(
+                "SELECT file_path FROM equipment_photos WHERE id = ?", (photo_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute("DELETE FROM equipment_photos WHERE id = ?", (photo_id,))
+            return str(row["file_path"])
+
+    def delete_orphan_photos(self, older_than_hours: int = 24) -> list[str]:
+        """Drop photos nothing claimed. Returns their file paths."""
+        cutoff = time.time() - older_than_hours * 3600
+        with self.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, file_path FROM equipment_photos
+                WHERE equipment_id IS NULL AND created_at < ?
+                """,
+                (cutoff,),
+            ).fetchall()
+            if not rows:
+                return []
+            conn.execute(
+                "DELETE FROM equipment_photos WHERE id IN (%s)"
+                % ", ".join("?" for _ in rows),
+                [row["id"] for row in rows],
+            )
+            return [str(row["file_path"]) for row in rows]
+
+    def update_equipment_fields(self, equipment_ids: list[str], changes: dict) -> int:
+        """Apply one set of changes to several devices. Returns how many changed."""
+        allowed = {"manufacturer", "model", "category", "description", "archived", "review_state"}
+        fields = {key: value for key, value in changes.items() if key in allowed}
+        if not equipment_ids or not fields:
+            return 0
+        assignments = ", ".join(f"{key} = ?" for key in fields)
+        placeholders = ", ".join("?" for _ in equipment_ids)
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                f"UPDATE equipment SET {assignments}, updated_at = ? WHERE id IN ({placeholders})",
+                (*fields.values(), time.time(), *equipment_ids),
+            )
+            return cursor.rowcount
 
     def add_research_finding(self, equipment_id: str, finding: dict) -> dict:
         finding = dict(finding)

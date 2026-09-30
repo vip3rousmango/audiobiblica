@@ -4,6 +4,7 @@ export type IconName =
   | 'activity'
   | 'arrow-up-right'
   | 'book'
+  | 'camera'
   | 'check'
   | 'chevron-down'
   | 'chevron-right'
@@ -49,6 +50,7 @@ const paths: Record<IconName, React.ReactNode> = {
   activity: <><path d="M3 12h4l2.2-7 4.6 14L16 12h5" /><path d="M3 5v14" /></>,
   'arrow-up-right': <><path d="M7 17 17 7" /><path d="M7 7h10v10" /></>,
   book: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21.5z" /><path d="M4 5.5v16" /><path d="M8 7h8M8 11h7" /></>,
+  camera: <><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.2a1.5 1.5 0 0 0 1.3-.75l.5-.85A1.5 1.5 0 0 1 10.8 3.6h2.4a1.5 1.5 0 0 1 1.3.8l.5.85A1.5 1.5 0 0 0 16.3 6h1.2A2.5 2.5 0 0 1 20 8.5v8A2.5 2.5 0 0 1 17.5 19h-11A2.5 2.5 0 0 1 4 16.5z" /><circle cx="12" cy="12.2" r="3.4" /></>,
   check: <path d="m5 12 4 4L19 6" />,
   'chevron-down': <path d="m6 9 6 6 6-6" />,
   'chevron-right': <path d="m9 6 6 6-6 6" />,

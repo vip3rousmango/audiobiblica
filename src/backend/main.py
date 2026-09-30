@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import logging
 import os
+import secrets
 import sqlite3
 import uuid
 from contextlib import asynccontextmanager
@@ -30,13 +33,31 @@ from src.backend.services.assistant import (
     chat_completion,
     check_runtime,
     list_models,
+    vision_describe,
 )
 from src.backend.services.catalog_archive import (
+    APP_VERSION,
     CatalogArchiveError,
     build_archive,
     restore_archive,
 )
 from src.backend.services.diagnostics import collect_diagnostics
+from src.backend.services.gear_scan import (
+    build_prompt,
+    match_existing,
+    parse_drafts,
+)
+from src.backend.services.mobile import (
+    MOBILE_COOKIE,
+    allowed_origin_regex,
+    capture_url,
+    is_loopback,
+    lan_address,
+    mobile_port,
+    mobile_token,
+    regenerate_mobile_token,
+    vision_model,
+)
 from src.backend.services.page_reader import read_page
 from src.backend.services.paths import (
     backup_created_at,
@@ -48,6 +69,7 @@ from src.backend.services.paths import (
     list_backups,
     manuals_dir,
     migrate_legacy_database,
+    photos_dir,
     recover_catalog,
     replace_catalog_with,
 )
@@ -88,19 +110,62 @@ def create_app() -> FastAPI:
         _catalog_recovery = recover_catalog()
         backup_database()
         get_storage()
+        # Photos uploaded from a phone but never attached (the page was closed,
+        # or the reading failed) are nobody's: they go, after a day's grace.
+        for orphan in await run_in_threadpool(get_storage().delete_orphan_photos):
+            Path(orphan).unlink(missing_ok=True)
         async with protocol_server.session_manager.run():
             yield
 
     app = FastAPI(
         title="AudioBiblica API",
-        version="0.1.1",
+        # Read from the one place the app's version is declared, so /health can
+        # never disagree with the version the image was built as.
+        version=APP_VERSION,
         description="Audio equipment knowledge management system",
         lifespan=lifespan,
     )
 
+    # A phone on the same wifi can reach this port, so every request that does
+    # not come from this computer has to present the pairing token first.
+    # Registered before the CORS middleware below on purpose: the last middleware
+    # added ends up outermost, and a browser's preflight asks what is allowed
+    # before it can send the cookie that would answer this check.
+    @app.middleware("http")
+    async def require_token_from_other_machines(request: Request, call_next):
+        client = request.client.host if request.client else None
+        if is_loopback(client):
+            return await call_next(request)
+        token = mobile_token()
+        supplied = request.query_params.get("t") or request.cookies.get(MOBILE_COOKIE)
+        if token and supplied and secrets.compare_digest(supplied.encode(), token.encode()):
+            response = await call_next(request)
+            if request.query_params.get("t"):
+                # No `secure` flag on purpose: pairing happens over plain HTTP on
+                # the local network, where a secure-only cookie is never sent
+                # back and every request after the first would be rejected.
+                response.set_cookie(
+                    MOBILE_COOKIE,
+                    token,
+                    max_age=60 * 60 * 24 * 365,
+                    httponly=True,
+                    samesite="lax",
+                    path="/",
+                )
+            return response
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": (
+                    "This catalog is only reachable from the computer it runs on. "
+                    "Open Settings → Mobile capture there and scan the code."
+                )
+            },
+        )
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origin_regex=allowed_origin_regex(),
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -180,6 +245,9 @@ class EquipmentCreate(BaseModel):
     model: str | None = None
     description: str | None = None
     specifications: dict = Field(default_factory=dict)
+    #: Devices captured from a photo arrive as drafts until the user confirms.
+    review_state: Literal["draft", "reviewed"] | None = None
+    photo_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class EquipmentResponse(BaseModel):
@@ -193,6 +261,9 @@ class EquipmentResponse(BaseModel):
     manuals: list[dict] = Field(default_factory=list)
     research_findings: list[dict] = Field(default_factory=list)
     archived: bool = False
+    #: None for an ordinary record, "draft" for one just captured from a photo.
+    review_state: str | None = None
+    photos: list[dict] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -222,6 +293,9 @@ class EquipmentUpdate(BaseModel):
     description: str | None = None
     specifications: dict | None = None
     archived: bool | None = None
+    review_state: Literal["draft", "reviewed"] | None = None
+    #: Photos this device was captured in; they are attached, not stored here.
+    photo_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
 class ResearchRequest(BaseModel):
@@ -266,6 +340,18 @@ def to_response(equipment) -> EquipmentResponse:
         manuals=equipment.manuals,
         research_findings=equipment.research_findings if hasattr(equipment, 'research_findings') else [],
         archived=equipment.archived if hasattr(equipment, 'archived') else False,
+        review_state=getattr(equipment, "review_state", None),
+        photos=[
+            {
+                "id": photo.id,
+                "file_name": photo.file_name,
+                "url": f"/api/v1/photos/{photo.id}/file",
+                "byte_size": photo.byte_size,
+                "content_type": photo.content_type,
+                "created_at": datetime.fromtimestamp(photo.created_at, timezone.utc).isoformat(),
+            }
+            for photo in get_storage().list_photos(equipment.id)
+        ],
         created_at=equipment.created_at,
         updated_at=equipment.updated_at,
     )
@@ -493,6 +579,9 @@ async def create_equipment(payload: EquipmentCreate) -> dict:
     """Create new equipment entry."""
     storage = get_storage()
     now = datetime.now(timezone.utc).isoformat()
+    # Claimed before the row exists so a photo that has gone cannot leave a
+    # device behind that the user did not ask for.
+    photo_ids = _claimable_photo_ids(payload.photo_ids, None)
     equipment = Equipment(
         id=str(uuid.uuid4()),
         name=payload.name,
@@ -502,10 +591,12 @@ async def create_equipment(payload: EquipmentCreate) -> dict:
         description=payload.description,
         specifications=payload.specifications,
         manuals=[],
+        review_state=payload.review_state,
         created_at=now,
         updated_at=now,
     )
     storage.create_equipment(equipment)
+    storage.attach_photos(equipment.id, photo_ids)
     return {"equipment": to_response(equipment).model_dump()}
 
 
@@ -517,28 +608,86 @@ async def update_equipment(equipment_id: str, payload: EquipmentUpdate) -> dict:
     if not equipment:
         raise HTTPException(status_code=404, detail="Equipment not found")
 
+    photo_ids = _claimable_photo_ids(payload.photo_ids, equipment_id)
     update_data = payload.model_dump(exclude_unset=True)
+    # photo_ids is not a column: it is what the caller wants attached.
+    update_data.pop("photo_ids", None)
     for key, value in update_data.items():
         setattr(equipment, key, value)
     equipment.updated_at = datetime.now(timezone.utc).isoformat()
     storage.update_equipment(equipment)
+    storage.attach_photos(equipment_id, photo_ids)
     return {"equipment": to_response(equipment).model_dump()}
+
+
+def _unlink_within(root: Path, paths: list[str]) -> None:
+    """Remove stored files, but only ones inside the directory they belong to."""
+    resolved = root.resolve()
+    for value in paths:
+        path = Path(value).resolve()
+        if resolved in path.parents:
+            path.unlink(missing_ok=True)
+
+
+def _delete_equipment_and_files(storage, equipment_id: str) -> bool:
+    """Delete a device along with the PDFs and photos stored for it."""
+    manual_paths = storage.get_manual_document_paths(equipment_id)
+    photo_paths = [photo.file_path for photo in storage.list_photos(equipment_id)]
+    if not storage.delete_equipment(equipment_id):
+        return False
+    _unlink_within(_manual_directory(), manual_paths)
+    _unlink_within(_photo_directory(), photo_paths)
+    return True
 
 
 @app.delete("/api/v1/equipment/{equipment_id}")
 async def delete_equipment(equipment_id: str) -> dict:
     """Delete equipment and its local PDF files."""
-    storage = get_storage()
-    paths = storage.get_manual_document_paths(equipment_id)
-    success = storage.delete_equipment(equipment_id)
-    if not success:
+    if not _delete_equipment_and_files(get_storage(), equipment_id):
         raise HTTPException(status_code=404, detail="Equipment not found")
-    manual_root = _manual_directory().resolve()
-    for value in paths:
-        path = Path(value).resolve()
-        if manual_root in path.parents:
-            path.unlink(missing_ok=True)
     return {"status": "deleted", "equipment_id": equipment_id}
+
+
+#: The columns the batch endpoint will touch. Anything else is a bug in the
+#: caller rather than something to write, so it is refused by name.
+BATCH_FIELDS = {"manufacturer", "model", "category", "description", "archived", "review_state"}
+
+
+class EquipmentBatchRequest(BaseModel):
+    ids: list[str] = Field(..., min_length=1, max_length=200)
+    changes: dict = Field(default_factory=dict)
+    delete: bool = False
+
+
+@app.post("/api/v1/equipment/batch")
+async def batch_update_equipment(payload: EquipmentBatchRequest) -> dict:
+    """Change or delete several devices at once.
+
+    A studio shot can produce a dozen drafts, and the machine asking is a phone
+    on wifi: one request that says what to do is worth more than a dozen round
+    trips, and it is the only way the desktop can tidy a capture in one gesture.
+    """
+    if payload.delete and payload.changes:
+        raise HTTPException(status_code=422, detail="Send either changes or delete, not both.")
+    if not payload.delete and not payload.changes:
+        raise HTTPException(status_code=422, detail="Nothing to change.")
+    unknown = set(payload.changes) - BATCH_FIELDS
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Those fields cannot be changed together: {', '.join(sorted(unknown))}",
+        )
+    if not payload.delete and payload.changes.get("review_state") not in (None, "draft", "reviewed"):
+        raise HTTPException(status_code=422, detail="A device is either a draft or reviewed.")
+
+    storage = get_storage()
+    if payload.delete:
+        # Ids the user already deleted elsewhere are simply gone: the intent is
+        # met either way, and saying so would be noise.
+        deleted = sum(1 for equipment_id in payload.ids if _delete_equipment_and_files(storage, equipment_id))
+        return {"updated": 0, "deleted": deleted}
+    updated = storage.update_equipment_fields(payload.ids, payload.changes)
+    return {"updated": updated, "deleted": 0}
 
 
 @app.post("/api/v1/equipment/{equipment_id}/manuals")
@@ -693,6 +842,228 @@ async def delete_manual(equipment_id: str, manual_id: str) -> dict:
     return {"manual": {"equipment_id": equipment_id, "manual_id": manual_id, "status": "deleted"}}
 
 
+
+#: How a photo from a phone gets in. The browser downscales before uploading, so
+#: this cap is generous; the signatures are what decides the type, never the
+#: filename, because a phone lies about that more often than not.
+PHOTO_LIMIT = 12 * 1024 * 1024
+
+
+def _photo_directory() -> Path:
+    return photos_dir()
+
+
+def _photo_type(contents: bytes) -> tuple[str, str] | None:
+    """The content type and suffix of an image, or ``None`` for anything else."""
+    if contents.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", ".jpg"
+    if contents.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", ".png"
+    if contents[:4] == b"RIFF" and contents[8:12] == b"WEBP":
+        return "image/webp", ".webp"
+    return None
+
+
+def _claimable_photo_ids(photo_ids: list[str], equipment_id: str | None) -> list[str]:
+    """The photo ids a device may take, or a 422 naming the problem.
+
+    Checked before anything is written so a create that cannot attach its photo
+    leaves no half-made device behind. A photo already owned by this same device
+    is fine: retrying a create should not look like a failure.
+    """
+    storage = get_storage()
+    unique = list(dict.fromkeys(photo_ids))
+    for photo_id in unique:
+        photo = storage.get_photo(photo_id)
+        owner = photo.equipment_id if photo else None
+        if photo is None or (owner is not None and owner != equipment_id):
+            raise HTTPException(
+                status_code=422,
+                detail="One of those photos is no longer available. Take it again.",
+            )
+    return unique
+
+
+@app.post("/api/v1/capture/photos")
+async def upload_capture_photo(file: UploadFile = File(...)) -> dict:
+    """Store one photo from a phone, before anything is known about it."""
+    contents = await file.read(PHOTO_LIMIT + 1)
+    if len(contents) > PHOTO_LIMIT:
+        raise HTTPException(
+            status_code=413,
+            detail="That photo is larger than 12 MB. Try again from the phone's camera.",
+        )
+    sniffed = _photo_type(contents)
+    if sniffed is None:
+        raise HTTPException(
+            status_code=415,
+            detail="That file is not a photo AudioBiblica can read. Use a JPEG or PNG.",
+        )
+    content_type, suffix = sniffed
+    photo_id = str(uuid.uuid4())
+    file_name = Path(file.filename or f"photo{suffix}").name[:255] or f"photo{suffix}"
+
+    photo_dir = _photo_directory()
+    photo_dir.mkdir(parents=True, exist_ok=True)
+    destination = photo_dir / f"{photo_id}{suffix}"
+    try:
+        destination.write_bytes(contents)
+        get_storage().save_photo(photo_id, str(destination), file_name, content_type, len(contents))
+    except Exception:
+        # A file with no row is unreachable, so it must not stay on disk.
+        destination.unlink(missing_ok=True)
+        raise
+    return {
+        "photo": {
+            "id": photo_id,
+            "file_name": file_name,
+            "url": f"/api/v1/photos/{photo_id}/file",
+            "byte_size": len(contents),
+            "content_type": content_type,
+        }
+    }
+
+
+@app.get("/api/v1/photos/{photo_id}/file")
+async def download_photo(photo_id: str):
+    """Serve a stored photo."""
+    photo = get_storage().get_photo(photo_id)
+    if not photo:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    path = Path(photo.file_path).resolve()
+    photo_root = _photo_directory().resolve()
+    if photo_root not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="Photo file is unavailable")
+    return FileResponse(path, media_type=photo.content_type, filename=photo.file_name)
+
+
+@app.delete("/api/v1/photos/{photo_id}")
+async def delete_photo(photo_id: str) -> dict:
+    """Forget a photo and the file behind it."""
+    path = get_storage().delete_photo(photo_id)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    Path(path).unlink(missing_ok=True)
+    return {"status": "deleted", "photo_id": photo_id}
+
+
+class CaptureReadRequest(BaseModel):
+    photo_id: str = Field(..., min_length=1, max_length=64)
+    mode: Literal["item", "studio"] = "item"
+
+
+@app.post("/api/v1/capture/read")
+async def read_capture_photo(payload: CaptureReadRequest) -> dict:
+    """Ask the local vision model what is in a photo and draft what to add."""
+    storage = get_storage()
+    photo = storage.get_photo(payload.photo_id)
+    if not photo:
+        raise HTTPException(status_code=404, detail="That photo is no longer here. Take it again.")
+    try:
+        contents = await run_in_threadpool(Path(photo.file_path).read_bytes)
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail="That photo is no longer here. Take it again.") from exc
+
+    settings = _assistant_settings()
+    try:
+        text = await vision_describe(
+            local_base_url=settings["local_base_url"],
+            model=vision_model(),
+            image_base64=base64.b64encode(contents).decode("ascii"),
+            prompt=build_prompt(payload.mode),
+        )
+    except AssistantError as exc:
+        message = str(exc)
+        # "not installed" is advice, not a failure: the app can tell the user how
+        # to fix it, and the phone page turns this into a sentence, not a stack.
+        status = 409 if "is not installed" in message else 502
+        raise HTTPException(status_code=status, detail=message) from exc
+
+    equipment = storage.list_equipment()
+    drafts = parse_drafts(text, payload.mode, payload.photo_id)
+    for draft in drafts:
+        draft.existing_id = match_existing(draft, equipment)
+    return {"drafts": [draft.__dict__ for draft in drafts]}
+
+
+
+async def _local_models(settings: dict) -> list[str] | None:
+    """The models the local runtime serves, or ``None`` when it cannot be asked.
+
+    Asked of the local runtime whatever the assistant is configured to use: a
+    photo is always read where it already is, so the assistant's provider has
+    nothing to do with whether a reader is installed.
+    """
+    try:
+        return await list_models(
+            runtime="builtin",
+            provider="Local",
+            api_key=None,
+            local_base_url=settings["local_base_url"],
+            nanobot_url=settings["nanobot_url"],
+            nanobot_api_key=None,
+        )
+    except AssistantError:
+        return None
+
+
+@app.get("/api/v1/mobile/status")
+async def mobile_status() -> dict:
+    """Everything the desktop needs to pair a phone, in one call that never fails."""
+    settings = _assistant_settings()
+    model = vision_model()
+    models = await _local_models(settings) or []
+    token = mobile_token()
+    return {
+        "enabled": bool(token),
+        "address": lan_address(),
+        "url": capture_url(),
+        "token_set": bool(token),
+        "port": mobile_port(),
+        "vision": {"model": model, "installed": model in models, "models": models},
+    }
+
+
+@app.post("/api/v1/mobile/token")
+async def rotate_mobile_token() -> dict:
+    """Replace the pairing token, unpairing every phone that had the old link."""
+    # Rotated first: the URL has to carry the new token, not the one it replaces.
+    token = regenerate_mobile_token()
+    return {"url": capture_url(), "token": token}
+
+
+@app.get("/api/v1/mobile/qr.svg")
+async def mobile_qr_code():
+    """The pairing URL as a QR code, for a phone's camera to read."""
+    url = capture_url()
+    if not url:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This computer is not on a network yet, so there is nothing for the phone "
+                "to connect to. Connect to wifi and try again."
+            ),
+        )
+    try:
+        import segno
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="The QR code library is missing from this installation.",
+        ) from exc
+    # A standalone document, not an inline fragment: segno's inline form omits
+    # the SVG namespace, which is fine inside HTML and a broken image behind an
+    # <img src>, which is where this is used.
+    code = io.BytesIO()
+    segno.make(url, error="m").save(
+        code, kind="svg", scale=5, dark="#0a0f10", light="#ffffff", border=2, xmldecl=False
+    )
+    svg = code.getvalue()
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-store"},
+    )
 @app.post("/api/v1/equipment/{equipment_id}/research")
 async def research_equipment(equipment_id: str, payload: ResearchRequest | None = None) -> dict:
     """Search manufacturer sources and retain each result as an equipment finding."""
@@ -1290,7 +1661,11 @@ async def start_update(payload: UpdateRequest | None = None) -> dict:
 async def diagnostics() -> dict:
     """The app's own health report: what is wrong and what can be done about it."""
     storage = get_storage()
-    assistant = await _assistant_probe(_assistant_settings(), get_config())
+    settings = _assistant_settings()
+    assistant = await _assistant_probe(settings, get_config())
+    # The reader check needs the local runtime's list, which is not the
+    # assistant's when a cloud provider is configured.
+    assistant["local_models"] = await _local_models(settings)
     # Cached only: a health report should not wait on GitHub. The interface asks
     # /api/v1/update/status separately, and that one does fetch.
     update = update_status_payload(cached_release())

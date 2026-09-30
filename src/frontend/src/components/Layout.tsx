@@ -1,12 +1,9 @@
-import React, { ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { getHealth } from '../lib/api';
 import { Icon, IconName } from './Icon';
 import { StatusDot } from './ui';
 
-interface LayoutProps {
-  children: ReactNode;
-}
 
 interface NavigationItem {
   label: string;
@@ -108,7 +105,7 @@ const CommandPalette: React.FC<{ open: boolean; onClose: () => void }> = ({ open
   );
 };
 
-const Layout: React.FC<LayoutProps> = ({ children }) => {
+const Layout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -233,7 +230,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             <span className="system-health"><StatusDot tone={serviceState === 'online' ? 'success' : serviceState === 'offline' ? 'danger' : 'neutral'} label={serviceState === 'online' ? 'API online' : serviceState === 'offline' ? 'API offline' : 'Checking API'} /></span>
           </div>
         </header>
-        <main id="main-content" className="page-container" tabIndex={-1}>{children}</main>
+        <main id="main-content" className="page-container" tabIndex={-1}><Outlet /></main>
       </div>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>

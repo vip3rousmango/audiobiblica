@@ -91,12 +91,35 @@ def test_manual_fallback_extraction_works():
     ("GET", "/api/v1/data/backups", None, 200),
     ("GET", "/api/v1/data/export", None, 200),
     ("POST", "/api/v1/research/fetch-url", {"url": "not a url"}, 200),
+    ("GET", "/api/v1/mobile/status", None, 200),
+    ("POST", "/api/v1/mobile/token", None, 200),
+    # 200 on a machine with a network, 409 without one; never a 500 either way.
+    ("GET", "/api/v1/mobile/qr.svg", None, None),
+    ("POST", "/api/v1/capture/photos", None, 422),
+    ("POST", "/api/v1/capture/read", {"photo_id": "nope"}, 404),
+    ("POST", "/api/v1/capture/read", {}, 422),
+    ("GET", "/api/v1/photos/nope/file", None, 404),
+    ("DELETE", "/api/v1/photos/nope", None, 404),
+    ("POST", "/api/v1/equipment/batch", {"ids": []}, 422),
+    ("POST", "/api/v1/equipment/batch", {"ids": ["nope"]}, 422),
 ])
 def test_routes_answer_without_server_error(client, method, path, body, expect):
     response = client.request(method, path, json=body)
     assert response.status_code != 500, f"{method} {path} -> 500: {response.text[:200]}"
     if expect is not None:
         assert response.status_code == expect, response.text
+
+
+def test_health_reports_the_declared_version(client):
+    """`/health` must report the one place the version is declared.
+
+    Two things depend on this agreeing: the update check compares that constant against the newest
+    release tag, and the page reloads when the running version changes after an update. A hardcoded
+    copy here drifts silently and only shows up as an update button that never appears.
+    """
+    from src.backend.services.catalog_archive import APP_VERSION
+
+    assert client.get("/health").json()["version"] == APP_VERSION
 
 
 def test_mcp_bridge_rejects_malformed_payload(client):

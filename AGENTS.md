@@ -79,6 +79,14 @@ Three promises constrain almost every change. Read them before designing somethi
   it from recreating itself).
 - **`.gitignore`'s `!src/frontend/src/lib/` negation is not optional** — the Python template's `lib/`
   rule would otherwise swallow the API client.
+- **Every request that is not from loopback must present the pairing token** (`services/mobile.py`,
+  the middleware in `create_app`). The port is published on every interface so a phone can reach it,
+  which means "reachable" and "trusted" are different things; nothing is exempt, `/health` included.
+  The token gate is registered *before* the CORS middleware so CORS ends up outermost — a preflight
+  has to be answered without a credential, or the browser never gets to send the cookie.
+- **A photo is read by the local runtime, never by the assistant's configured provider.** Mobile
+  status and the diagnostics check ask Ollama directly (`_local_models`); a cloud assistant says
+  nothing about whether a photo can be read.
 
 ## Key Directories
 
@@ -86,10 +94,12 @@ Three promises constrain almost every change. Read them before designing somethi
 | --- | --- |
 | `src/backend/main.py` | The HTTP surface, lifespan, Pydantic models, error handler, `mount_ui` |
 | `src/backend/services/` | `paths.py` (data dir, catalog recovery, snapshots, logging), `storage.py`, `assistant.py`, `diagnostics.py`, `updater.py`, `catalog_archive.py`, `page_reader.py`, `pdf_processing.py`, `firecrawl_service.py` |
+| `src/backend/services/gear_scan.py` | Prompt, JSON parsing and de-duplication for phone captures (no HTTP, so it is testable with fixed strings) |
+| `src/backend/services/mobile.py` | Pairing token, loopback test, LAN address, capture URL, allowed origins |
 | `src/backend/mcp/` | MCP tool dispatch and the FastMCP Streamable HTTP app |
-| `src/frontend/src/lib/` | `api.ts` (the single typed client + `friendlyMessage`), `useUpdate.ts` |
-| `src/frontend/src/components/` | `ui.tsx` primitives, `Layout.tsx`, `SetupChecklist.tsx`, `SetupDoctor.tsx`, `UpdateNotice.tsx`, `NanobotChat.tsx` |
-| `src/frontend/src/pages/` | `Dashboard`, `Library`, `ResearchAgent`, `Mcp`, `Settings` |
+| `src/frontend/src/lib/` | `api.ts` (the single typed client + `friendlyMessage`), `photo.ts` (browser-side downscale before upload), `useUpdate.ts` |
+| `src/frontend/src/components/` | `ui.tsx` primitives, `Layout.tsx`, `SetupChecklist.tsx`, `SetupDoctor.tsx`, `UpdateNotice.tsx`, `NanobotChat.tsx`, `MobileCapture.tsx` |
+| `src/frontend/src/pages/` | `Dashboard`, `Library`, `ResearchAgent`, `Mcp`, `Settings`, and `Capture` (the phone-only page, rendered outside the desktop shell) |
 | `src/frontend/src/styles.css` | All styling: design tokens as CSS custom properties, kebab-case classes |
 | `tests/` | `conftest.py` (shared client), `test_api_smoke.py`, `test_updater.py` |
 | `scripts/` | `audiobiblica` (installer/updater/launcher), `updater.sh` (the sidecar) |
@@ -196,6 +206,8 @@ Release: push a `v*` tag — `.github/workflows/release.yml` runs the tests, pub
   move when the compose file is run from a different directory. The updater sidecar is `docker:cli`.
 - **Version strings live in four places** and move together: `pyproject.toml`, `APP_VERSION` in
   `catalog_archive.py`, `package.json`, `package-lock.json` — plus a `CHANGELOG.md` entry.
+  `main.py` reads `APP_VERSION` for `FastAPI(version=...)`, so `/health` cannot drift; the full
+  release procedure is [docs/RELEASING.md](docs/RELEASING.md).
 - **The container is the app.** The PyPI package is the API and MCP server only; it has no interface.
 
 ## Testing & QA

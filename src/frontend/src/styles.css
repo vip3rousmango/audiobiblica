@@ -511,3 +511,58 @@ p { line-height: 1.62; }
 .doctor-errors { margin-block-start: 14px; }
 .doctor-errors summary { display: flex; gap: 7px; align-items: center; color: var(--muted); cursor: pointer; font-size: .68rem; }
 .doctor-errors pre { max-height: 240px; margin: 9px 0 0; padding: 11px; overflow: auto; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); color: var(--text-soft); font-family: var(--font-mono); font-size: .6rem; line-height: 1.6; white-space: pre-wrap; }
+
+/* --- Mobile capture page -----------------------------------------------------
+   A phone held one-handed at a rack: one column, large tap targets, and text
+   large enough to read at arm's length. It shares no layout with the desktop
+   shell because it shares none of its problems. */
+.capture-page { display: grid; gap: 16px; max-width: 560px; margin-inline: auto; padding: 16px; }
+.capture-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.capture-header h1 { margin: 0; font-size: 1.15rem; letter-spacing: -.01em; }
+.capture-header p { margin: 3px 0 0; color: var(--muted); font-size: .68rem; }
+.capture-modes { display: flex; gap: 8px; }
+.capture-modes .button { flex: 1; }
+.capture-hint { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.capture-shot { min-height: 56px; font-size: .84rem; }
+.capture-status { margin: 0; color: var(--muted); font-size: .72rem; }
+.capture-preview { width: 100%; max-height: 260px; border: 1px solid var(--border); border-radius: 11px; object-fit: contain; background: var(--panel); }
+.capture-footer { display: flex; gap: 8px; align-items: start; color: var(--muted); font-size: .65rem; line-height: 1.5; }
+
+.draft-card { display: grid; gap: 14px; padding: 15px; border: 1px solid var(--border); border-radius: 13px; background: linear-gradient(140deg, rgba(22, 33, 34, .88), rgba(14, 21, 22, .9)); }
+.draft-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.draft-card-head h2 { margin: 0; font-size: .82rem; }
+.draft-chip { padding: 3px 8px; border: 1px solid rgba(116, 217, 200, .25); border-radius: 5px; background: rgba(116, 217, 200, .07); color: var(--teal); font-family: var(--font-mono); font-size: .6rem; }
+.draft-fields { display: grid; gap: 6px; }
+.draft-fields label { color: var(--text-soft); font-size: .68rem; font-weight: 700; }
+.draft-fields input, .draft-fields select, .draft-fields textarea { width: 100%; border: 1px solid var(--border); border-radius: 8px; outline: none; background: #0d1516; color: var(--text); font-size: .78rem; }
+.draft-fields input, .draft-fields select { min-height: 44px; padding: 0 11px; }
+.draft-fields textarea { min-height: 62px; padding: 9px 11px; resize: vertical; }
+.draft-fields input:focus, .draft-fields select:focus, .draft-fields textarea:focus { border-color: var(--acid-dark); box-shadow: 0 0 0 3px rgba(212, 245, 106, .1); }
+.draft-fields input:disabled, .draft-fields select:disabled, .draft-fields textarea:disabled { color: var(--muted); }
+.draft-actions { display: flex; gap: 8px; }
+.draft-actions .button { flex: 1; min-height: 44px; }
+
+/* --- Captured photos and drafts in the desktop app --------------------------- */
+.photo-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.photo-thumb { position: relative; width: 108px; }
+.photo-thumb img { width: 108px; height: 76px; border: 1px solid var(--border); border-radius: 8px; object-fit: cover; background: var(--panel); }
+.photo-thumb .button { margin-block-start: 4px; width: 100%; }
+.tag-draft { border-color: rgba(244, 189, 105, .28); background: rgba(244, 189, 105, .08); color: var(--amber); }
+.draft-banner { margin-block-end: 14px; }
+.batch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-block-end: 14px; padding: 11px 13px; border: 1px solid var(--acid-dark); border-radius: 11px; background: rgba(212, 245, 106, .05); }
+.batch-count { color: var(--acid); font-size: .72rem; font-weight: 700; }
+.batch-bar input, .batch-bar select { min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; outline: none; background: #0d1516; color: var(--text); font-size: .72rem; }
+.batch-bar input { flex: 1 1 150px; max-width: 220px; }
+.batch-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-inline-start: auto; }
+.select-cell { width: 34px; }
+.card-select { display: flex; align-items: center; gap: 8px; }
+.card-select input { width: 17px; height: 17px; accent-color: var(--acid); }
+
+/* --- Settings: pairing a phone ---------------------------------------------- */
+.mobile-panel { display: grid; gap: 16px; }
+.mobile-qr { display: flex; flex-wrap: wrap; gap: 18px; align-items: start; }
+.mobile-qr img { width: 220px; height: 220px; padding: 9px; border: 1px solid var(--border); border-radius: 11px; background: #fff; }
+.mobile-qr-copy { display: grid; gap: 9px; flex: 1 1 240px; }
+.mobile-url { padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); color: var(--teal); font-family: var(--font-mono); font-size: .62rem; word-break: break-all; user-select: all; }
+.mobile-reader { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.link-button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }

@@ -156,17 +156,22 @@ Every variable is read by the backend, except `VITE_API_BASE_URL`, which is read
 | `AUDIOBIBLICA_DB_PATH` | SQLite catalog file. Overrides `AUDIOBIBLICA_DATA_DIR`. | `AUDIOBIBLICA_DATA_DIR/audiobiblica.db` |
 | `AUDIOBIBLICA_CONFIG_PATH` | JSON settings file (assistant provider, API keys, endpoints), written `0600`. Overrides `AUDIOBIBLICA_DATA_DIR`. | `AUDIOBIBLICA_DATA_DIR/config.json` |
 | `AUDIOBIBLICA_MANUAL_DIR` | Directory for uploaded PDF manuals. Overrides `AUDIOBIBLICA_DATA_DIR`. | `AUDIOBIBLICA_DATA_DIR/manuals` |
+| `AUDIOBIBLICA_PHOTO_DIR` | Directory for photos captured from a phone. Overrides `AUDIOBIBLICA_DATA_DIR`. | `AUDIOBIBLICA_DATA_DIR/photos` |
 | `AUDIOBIBLICA_MCP_ALLOWED_HOSTS` | Comma-separated `Host` headers the MCP endpoint accepts (DNS-rebinding protection). | `127.0.0.1:*,localhost:*,[::1]:*,host.docker.internal:*` |
+| `AUDIOBIBLICA_MOBILE_TOKEN` | Pins the phone pairing token instead of using the one saved in `config.json`. A pinned token is not affected by "New link" in Settings. | unset (generated on first pairing) |
+| `AUDIOBIBLICA_LAN_ADDRESS` | The address a phone should use, for a machine with several network interfaces. | guessed from the default route |
+| `AUDIOBIBLICA_PORT` | The port quoted in the pairing URL and QR code. | `8000` |
 | `FIRECRAWL_API_KEY` | Firecrawl key for web search and manufacturer research; can also be saved from Settings. | unset |
 | `FIRECRAWL_API_URL` | Firecrawl API base URL. | Firecrawl's public endpoint |
 | `OLLAMA_BASE_URL` | Local model endpoint used as the assistant default. | `http://127.0.0.1:11434` |
 | `NANOBOT_BASE_URL` | Nanobot gateway exposed to the assistant runtime. | `http://127.0.0.1:8900` |
 | `ASSISTANT_NUM_CTX` | Context window requested from a local runtime per request. Ollama otherwise uses the model's full training context (131072 for `llama3.2`), whose KV cache is what makes small models crawl on a laptop. | `8192` |
 | `ASSISTANT_MODEL` | Default assistant model when none is saved in Settings. | `llama3.2:3b` |
+| `ASSISTANT_VISION_MODEL` | Model that reads photos taken with a phone. | `qwen2.5vl:7b` |
 | `ASSISTANT_TIMEOUT` | Seconds to wait for one assistant response. | `180` |
 | `VITE_API_BASE_URL` | Frontend override for the backend origin, read at build time. Empty in a production build, so the UI calls whatever origin served it; `src/frontend/.env.development` sets it to `http://127.0.0.1:8000` for `npm run dev`. | empty (dev: `http://127.0.0.1:8000`) |
 
-The per-item overrides (`AUDIOBIBLICA_DB_PATH`, `AUDIOBIBLICA_CONFIG_PATH`, `AUDIOBIBLICA_MANUAL_DIR`) win over `AUDIOBIBLICA_DATA_DIR`, so an existing install that points at a specific file keeps working.
+The per-item overrides (`AUDIOBIBLICA_DB_PATH`, `AUDIOBIBLICA_CONFIG_PATH`, `AUDIOBIBLICA_MANUAL_DIR`, `AUDIOBIBLICA_PHOTO_DIR`) win over `AUDIOBIBLICA_DATA_DIR`, so an existing install that points at a specific file keeps working.
 
 Credentials entered in Settings are stored in `config.json` as plaintext. The API never returns them: only a masked key and an `api_key_configured` flag are exposed. The server binds to loopback by default in the source workflow.
 

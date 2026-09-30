@@ -17,6 +17,7 @@ from typing import Optional
 
 from src.backend.config import get_config
 from src.backend.services.catalog_archive import APP_VERSION
+from src.backend.services.mobile import vision_model
 from src.backend.services.paths import (
     BACKUP_STALE_DAYS,
     backup_created_at,
@@ -266,6 +267,40 @@ def _manual_files_check(missing: Optional[int]) -> dict:
         "fix": None,
     }
 
+def _vision_check(assistant: dict) -> dict:
+    """Whether a phone photo can be read at all.
+
+    ``local_models`` is the list served by the runtime that would read the photo,
+    which is not necessarily the one the assistant is configured to use: a photo
+    never leaves the machine, so a cloud assistant says nothing about it. It is
+    ``None`` when that runtime could not be reached.
+    """
+    model = vision_model()
+    models = assistant.get("local_models")
+    if models is None:
+        return {
+            "id": "vision_model",
+            "level": "warn",
+            "title": "Cannot check the photo reader",
+            "detail": "AudioBiblica could not reach the local model runtime, so it cannot say whether a photo reader is installed. Photos can still be stored; they cannot be read until one is.",
+            "fix": {"kind": "download_model", "label": f"Download {model}", "model": model},
+        }
+    if model in models:
+        return {
+            "id": "vision_model",
+            "level": "ok",
+            "title": "The photo reader is installed",
+            "detail": f"{model} can read photos taken with your phone.",
+            "fix": None,
+        }
+    return {
+        "id": "vision_model",
+        "level": "warn",
+        "title": "The photo reader is not installed",
+        "detail": "Photos from your phone can be stored, but nothing can read them yet.",
+        "fix": {"kind": "download_model", "label": f"Download {model}", "model": model},
+    }
+
 
 def collect_diagnostics(
     recovery: Optional[dict], assistant: dict, counts: Optional[dict], update: Optional[dict] = None
@@ -285,6 +320,7 @@ def collect_diagnostics(
         _assistant_runtime_check(assistant),
         _assistant_model_check(assistant),
         _manual_files_check(_missing_manual_files()),
+        _vision_check(assistant),
         _update_check(update),
     ]
     config = get_config()

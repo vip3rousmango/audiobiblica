@@ -52,6 +52,11 @@ def manuals_dir() -> Path:
     return Path(os.getenv("AUDIOBIBLICA_MANUAL_DIR") or data_dir() / "manuals")
 
 
+def photos_dir() -> Path:
+    """Photos captured from a phone, named by photo id."""
+    return Path(os.getenv("AUDIOBIBLICA_PHOTO_DIR") or data_dir() / "photos")
+
+
 def backups_dir() -> Path:
     """Directory holding automatic catalog snapshots."""
     return data_dir() / "backups"

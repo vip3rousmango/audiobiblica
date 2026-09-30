@@ -161,6 +161,53 @@ async def chat_completion(
     raise AssistantError(f"Unsupported assistant provider: {provider}")
 
 
+async def vision_describe(
+    *,
+    local_base_url: str,
+    model: str,
+    image_base64: str,
+    prompt: str,
+) -> str:
+    """Send one photo and one prompt to a local vision model, return its text.
+
+    Only Ollama is spoken here, and only on this machine: photos from a phone are
+    read where they already are. The temperature is pinned to zero because the
+    caller wants an identification, not a description, and a cold model drop is
+    retried for the same reason the text path retries it.
+    """
+    base_url = local_base_url.rstrip("/") or os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
+    payload = {
+        "model": model,
+        "stream": False,
+        "messages": [{"role": "user", "content": prompt, "images": [image_base64]}],
+        "options": {"num_predict": 900, "temperature": 0, "num_ctx": _num_ctx()},
+    }
+    result = None
+    for attempt in range(2):
+        try:
+            result = await _post_json(
+                f"{base_url}/api/chat",
+                headers={"Content-Type": "application/json"},
+                payload=payload,
+            )
+            break
+        except AssistantTransportError:
+            if attempt == 1:
+                raise
+        except AssistantError as exc:
+            # Ollama answers 404 for a model it does not have; that is a missing
+            # download rather than a failure, and the caller turns it into advice.
+            if "HTTP 404" in str(exc):
+                raise AssistantError(f"The photo reader {model} is not installed") from exc
+            raise
+    if result is None:
+        raise AssistantError("The photo reader did not return a reading")
+    try:
+        return result["message"]["content"]
+    except (KeyError, TypeError) as exc:
+        raise AssistantError("The photo reader returned no reading") from exc
+
+
 async def check_runtime(
     *,
     runtime: str,

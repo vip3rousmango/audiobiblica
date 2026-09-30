@@ -1,6 +1,6 @@
 import React, { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { addManual, createEquipment, deleteEquipment, deleteManual, Equipment, listEquipment, Manual, updateEquipment, uploadManualPdf, getApiBaseUrl } from '../lib/api';
+import { addManual, batchUpdateEquipment, createEquipment, deleteEquipment, deleteManual, deletePhoto, Equipment, listEquipment, Manual, updateEquipment, uploadManualPdf, getApiBaseUrl } from '../lib/api';
 import { Icon } from '../components/Icon';
 import { Dropdown } from '../components/Dropdown';
 import { Button, EmptyState, InlineNotice, PageHeader, Surface } from '../components/ui';
@@ -132,17 +132,49 @@ const EquipmentDrawer: React.FC<{
     }
   };
 
+  const removePhoto = async (photoId: string) => {
+    if (!window.confirm('Remove this photo? The device and its details stay.')) return;
+    try {
+      setBusy(true);
+      await deletePhoto(photoId);
+      await refreshEquipment();
+    } catch (caught) {
+      setMessageTone('danger');
+      setMessage(caught instanceof Error ? caught.message : 'Could not remove this photo.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const markReviewed = async () => {
+    try {
+      setBusy(true);
+      onUpdated(await updateEquipment(equipment.id, { review_state: 'reviewed' }));
+    } catch (caught) {
+      setMessageTone('danger');
+      setMessage(caught instanceof Error ? caught.message : 'Could not update this record.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <button className="drawer-backdrop" aria-label="Close equipment details" onClick={onClose} />
       <aside className="drawer" role="dialog" aria-modal="true" aria-labelledby="equipment-detail-title" ref={drawerRef} tabIndex={-1}>
         <div className="drawer-header">
           <div><h2 id="equipment-detail-title">{equipment.name}</h2><p>{equipment.manufacturer}{equipment.model ? ` · ${equipment.model}` : ''}</p></div>
-          <button className="modal-close" aria-label="Close equipment details" onClick={onClose}><Icon name="close" size={17} /></button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {equipment.review_state === 'draft' && <Button size="sm" variant="secondary" icon="check" disabled={busy} onClick={() => void markReviewed()}>Mark reviewed</Button>}
+            <button className="modal-close" aria-label="Close equipment details" onClick={onClose}><Icon name="close" size={17} /></button>
+          </div>
         </div>
         <div className="drawer-body">
-          <div className="equipment-meta"><span className="tag tag-acid">{equipment.category || 'Uncategorised'}</span><span className="tag">ID {equipment.id}</span></div>
-          <p className="page-description" style={{ marginBlockStart: 20 }}>{equipment.description || 'No description has been added yet. Add context here so the assistant can understand how this device fits your studio.'}</p>
+          {equipment.review_state === 'draft' && (
+            <InlineNotice tone="warning" icon="camera">
+              This device came from a photo and has not been checked over yet.
+            </InlineNotice>
+          )}
           <dl className="spec-list">
             <div className="spec-row"><dt>Manufacturer</dt><dd>{equipment.manufacturer || 'Unknown'}</dd></div>
             <div className="spec-row"><dt>Model</dt><dd>{equipment.model || 'Not set'}</dd></div>
@@ -179,6 +211,23 @@ const EquipmentDrawer: React.FC<{
             </div>
             {message && <InlineNotice tone={messageTone} icon={messageTone === 'success' ? 'check' : 'x'}>{message}</InlineNotice>}
           </section>
+
+          {(equipment.photos?.length ?? 0) > 0 && (
+            <section style={{ marginBlockStart: 24 }} aria-labelledby="photos-heading">
+              <h3 id="photos-heading" style={{ fontSize: '0.8rem', marginBlockEnd: 12, color: 'var(--text-soft)' }}>Photos ({equipment.photos?.length})</h3>
+              <div className="photo-strip">
+                {equipment.photos?.map((photo) => (
+                  <div className="photo-thumb" key={photo.id}>
+                    <a href={`${getApiBaseUrl()}${photo.url}`} target="_blank" rel="noreferrer">
+                      <img src={`${getApiBaseUrl()}${photo.url}`} alt={photo.file_name} loading="lazy" />
+                    </a>
+                    <Button variant="ghost" size="sm" icon="x" disabled={busy} onClick={() => void removePhoto(photo.id)}>Remove</Button>
+                  </div>
+                ))}
+              </div>
+              <p className="field-help" style={{ marginBlockStart: 8 }}>Taken from your phone, kept with this device.</p>
+            </section>
+          )}
 
           {findings.length > 0 && (
             <section style={{ marginBlockStart: 24 }} aria-labelledby="research-findings-heading">
@@ -294,6 +343,12 @@ const Library: React.FC = () => {
   const [showAdd, setShowAdd] = useState(searchParams.get('new') === '1');
   const [selected, setSelected] = useState<Equipment | null>(null);
   const [editing, setEditing] = useState<Equipment | null>(null);
+  /* Ticking devices is how a studio capture gets tidied: capture marks them as
+     drafts, this is where a batch of them is confirmed or thrown away. */
+  const [marked, setMarked] = useState<Set<string>>(new Set());
+  const [reviewOnly, setReviewOnly] = useState(false);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
 
   const loadEquipment = useCallback(async () => {
     setLoading(true);
@@ -314,10 +369,40 @@ const Library: React.FC = () => {
     const normalized = query.trim().toLowerCase();
     return equipment.filter((item) => {
       const matchesCategory = category === 'All categories' || item.category === category;
+      const matchesReview = !reviewOnly || item.review_state === 'draft';
       const haystack = [item.name, item.manufacturer, item.model, item.category, item.description, ...Object.values(item.specifications ?? {})].join(' ').toLowerCase();
-      return matchesCategory && (!normalized || haystack.includes(normalized));
+      return matchesCategory && matchesReview && (!normalized || haystack.includes(normalized));
     });
-  }, [category, equipment, query]);
+  }, [category, equipment, query, reviewOnly]);
+
+  const drafts = useMemo(() => equipment.filter((item) => item.review_state === 'draft'), [equipment]);
+
+  const toggleMarked = (id: string) => {
+    setMarked((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  /* One request for the whole selection: the backend does the work, and a
+     studio's worth of drafts is cleared in a single gesture. */
+  const runBatch = async (changes: Record<string, unknown> = {}, remove = false) => {
+    const ids = [...marked];
+    if (ids.length === 0) return;
+    if (remove && !window.confirm(`Delete ${ids.length} device${ids.length === 1 ? '' : 's'} and their photos? This cannot be undone.`)) return;
+    setBatchBusy(true);
+    try {
+      await batchUpdateEquipment(ids, changes, remove);
+      await loadEquipment();
+      setMarked(new Set());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not update those devices.');
+    } finally {
+      setBatchBusy(false);
+    }
+  };
 
   const closeAdd = () => {
     setShowAdd(false);
@@ -365,6 +450,17 @@ const Library: React.FC = () => {
 
       {error && <InlineNotice tone="warning" icon="server">{error} The interface is still usable; reconnect to load or persist catalog changes.</InlineNotice>}
 
+      {drafts.length > 0 && !bannerDismissed && (
+        <div className="draft-banner">
+          <InlineNotice tone="warning" icon="camera">
+            {drafts.length} captured device{drafts.length === 1 ? '' : 's'} need a look — they came from a
+            phone photo and have not been checked over.{' '}
+            <button type="button" className="link-button" onClick={() => setReviewOnly(true)}>Review them</button>{' '}
+            <button type="button" className="link-button" onClick={() => setBannerDismissed(true)}>Dismiss</button>
+          </InlineNotice>
+        </div>
+      )}
+
       <Surface>
         <div className="surface-body">
           <div className="library-toolbar">
@@ -372,13 +468,72 @@ const Library: React.FC = () => {
             <div className="toolbar-controls"><span className="library-count">{loading ? 'Loading…' : `${filteredEquipment.length} of ${equipment.length} records`}</span><select className="select-control" aria-label="Filter by category" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select><div className="view-toggle" aria-label="Choose view"><button className={viewMode === 'grid' ? 'active' : ''} aria-label="Grid view" aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')}><Icon name="grid" size={15} /></button><button className={viewMode === 'table' ? 'active' : ''} aria-label="Table view" aria-pressed={viewMode === 'table'} onClick={() => setViewMode('table')}><Icon name="layers" size={15} /></button></div><Button variant="ghost" size="sm" icon="refresh" aria-label="Refresh equipment" onClick={() => void loadEquipment()} disabled={loading} /></div>
           </div>
 
+          {reviewOnly && (
+            <div className="draft-banner">
+              <InlineNotice tone="info" icon="camera">
+                Showing only captured devices.{' '}
+                <button type="button" className="link-button" onClick={() => setReviewOnly(false)}>Show everything</button>
+              </InlineNotice>
+            </div>
+          )}
+
+          {marked.size > 0 && (
+            <div className="batch-bar">
+              <span className="batch-count">{marked.size} selected</span>
+              <select
+                aria-label="Set the category for the selected devices"
+                defaultValue=""
+                disabled={batchBusy}
+                onChange={(event) => { if (event.target.value) void runBatch({ category: event.target.value }); }}
+              >
+                <option value="">Set category…</option>
+                {categories.slice(1).map((item) => <option key={item} value={item}>{item}</option>)}
+              </select>
+              <input
+                type="text"
+                placeholder="Set manufacturer…"
+                aria-label="Set the manufacturer for the selected devices"
+                disabled={batchBusy}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter') return;
+                  const value = event.currentTarget.value.trim();
+                  if (value) void runBatch({ manufacturer: value });
+                }}
+                onBlur={(event) => {
+                  const value = event.target.value.trim();
+                  if (value) void runBatch({ manufacturer: value });
+                }}
+              />
+              <div className="batch-actions">
+                <Button size="sm" variant="secondary" icon="check" disabled={batchBusy} onClick={() => void runBatch({ review_state: 'reviewed' })}>Mark reviewed</Button>
+                <Button size="sm" variant="secondary" icon="database" disabled={batchBusy} onClick={() => void runBatch({ archived: true })}>Archive</Button>
+                <Button size="sm" variant="danger" icon="x" disabled={batchBusy} onClick={() => void runBatch({}, true)}>Delete</Button>
+                <Button size="sm" variant="ghost" disabled={batchBusy} onClick={() => setMarked(new Set())}>Clear</Button>
+              </div>
+            </div>
+          )}
+
           {!loading && filteredEquipment.length === 0 ? (
             <EmptyState
               icon={query || category !== 'All categories' ? 'search' : 'package'}
-              title={query || category !== 'All categories' ? 'No matching equipment' : 'Your library is empty'}
-              description={query || category !== 'All categories' ? 'Try a broader search or remove the category filter.' : 'Start with the gear that defines your setup. You can enrich each record with manuals and research afterward.'}
-              action={query || category !== 'All categories' ? (
-                <Button variant="secondary" size="sm" onClick={() => { setQuery(''); setCategory('All categories'); }}>Clear filters</Button>
+              title={
+                reviewOnly && drafts.length === 0
+                  ? 'Nothing left to review'
+                  : query || category !== 'All categories'
+                    ? 'No matching equipment'
+                    : 'Your library is empty'
+              }
+              description={
+                reviewOnly && drafts.length === 0
+                  ? 'Every device captured from a photo has been checked over.'
+                  : query || category !== 'All categories'
+                    ? 'Try a broader search or remove the category filter.'
+                    : 'Start with the gear that defines your setup. You can enrich each record with manuals and research afterward.'
+              }
+              action={reviewOnly && drafts.length === 0 ? (
+                <Button variant="secondary" size="sm" onClick={() => setReviewOnly(false)}>Show everything</Button>
+              ) : query || category !== 'All categories' ? (
+                <Button variant="secondary" size="sm" onClick={() => { setQuery(''); setCategory('All categories'); setReviewOnly(false); }}>Clear filters</Button>
               ) : (
                 <>
                   <Button variant="primary" size="sm" icon="plus" onClick={() => setShowAdd(true)}>Add first device</Button>
@@ -392,7 +547,17 @@ const Library: React.FC = () => {
               {filteredEquipment.map((item) => (
                 <article className="equipment-card" key={item.id}>
                   <div className="equipment-card-header">
-                    <div><h3><button type="button" className="equipment-card-title" onClick={() => setSelected(item)}>{item.name}</button></h3><p className="equipment-card-manufacturer">{item.manufacturer}</p></div>
+                    <div className="card-select">
+                      {(reviewOnly || marked.size > 0) && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${item.name}`}
+                          checked={marked.has(item.id)}
+                          onChange={() => toggleMarked(item.id)}
+                        />
+                      )}
+                      <div><h3><button type="button" className="equipment-card-title" onClick={() => setSelected(item)}>{item.name}</button></h3><p className="equipment-card-manufacturer">{item.manufacturer}</p></div>
+                    </div>
                     <Dropdown
                       trigger={<Icon name="more" size={16} />}
                       items={[
@@ -405,6 +570,7 @@ const Library: React.FC = () => {
                   <p className="equipment-card-description">{item.description || 'No context added yet. Open this record to review specifications and link documentation.'}</p>
                   <div className="equipment-meta">
                     <span className="tag tag-acid">{item.category || 'Other'}</span>
+                    {item.review_state === 'draft' && <span className="tag tag-draft">Needs review</span>}
                     {item.model && <span className="tag">{item.model}</span>}
                     <span className="tag">{item.manuals?.length ?? 0} manuals</span>
                     <span className="tag tag-acid">{item.research_findings?.length ?? 0} research</span>
@@ -413,7 +579,7 @@ const Library: React.FC = () => {
               ))}
             </div>
           ) : (
-            <div className="table-wrap"><table className="data-table"><thead><tr><th>Device</th><th>Category</th><th>Model</th><th>Manuals</th><th>Research</th><th>Record ID</th></tr></thead><tbody>{filteredEquipment.map((item) => <tr key={item.id} tabIndex={0} onClick={() => setSelected(item)} onKeyDown={(event) => { if (event.key === 'Enter') setSelected(item); }}><td><span className="table-name"><strong>{item.name}</strong><span>{item.manufacturer}</span></span></td><td><span className="tag tag-acid">{item.category || 'Other'}</span></td><td>{item.model || '—'}</td><td>{item.manuals?.length ?? 0}</td><td><span className="tag tag-acid">{item.research_findings?.length ?? 0}</span></td><td><span className="tag">{item.id}</span></td></tr>)}</tbody></table></div>
+            <div className="table-wrap"><table className="data-table"><thead><tr><th className="select-cell"><span className="sr-only">Select</span></th><th>Device</th><th>Category</th><th>Model</th><th>Manuals</th><th>Research</th><th>Record ID</th></tr></thead><tbody>{filteredEquipment.map((item) => <tr key={item.id} tabIndex={0} onClick={() => setSelected(item)} onKeyDown={(event) => { if (event.key === 'Enter') setSelected(item); }}><td className="select-cell">{(reviewOnly || marked.size > 0) && <input type="checkbox" aria-label={`Select ${item.name}`} checked={marked.has(item.id)} onClick={(event) => event.stopPropagation()} onChange={() => toggleMarked(item.id)} />}</td><td><span className="table-name"><strong>{item.name}</strong><span>{item.manufacturer}</span></span></td><td><span className="tag tag-acid">{item.category || 'Other'}</span>{item.review_state === 'draft' && <span className="tag tag-draft">Needs review</span>}</td><td>{item.model || '—'}</td><td>{item.manuals?.length ?? 0}</td><td><span className="tag tag-acid">{item.research_findings?.length ?? 0}</span></td><td><span className="tag">{item.id}</span></td></tr>)}</tbody></table></div>
           )}
         </div>
       </Surface>

@@ -28,6 +28,7 @@ AudioBiblica is one place to keep all of it, on your machine:
 - **Your manuals, searchable.** Drag in the PDFs you already own, or paste a product page and let the app read it for you.
 - **Plain questions, real answers.** "What are the input and output connections on the interface I just added?" The assistant reads *your* catalog to answer — not the internet.
 - **Notes that stay found.** Research you gather about a piece of gear is attached to that piece of gear, not buried in a browser history.
+- **Your gear, photographed.** Point your phone at a device, scan the code in Settings, and the app writes the entry for you — one device, or a whole rack in a single shot.
 
 ```text
    your gear  ──►  your catalog  ──►  a question  ──►  an answer you can act on
@@ -96,6 +97,7 @@ Everything lives in one folder:
 - `backups/` — automatic copies of your catalog, taken every time the app starts. The ten newest are kept.
 - `config.json` — your settings and any API keys you entered.
 - `audiobiblica.log` — what the app did. If something ever goes wrong it shows you a short reference like `Ref 4f2a9c31`, and the matching detail is in this file.
+- `photos/` — photos you took from your phone, kept with the gear they produced.
 
 When you run it with Docker, that folder is a Docker storage area called `audiobiblica_data` instead of a visible folder. You can back the whole thing up by exporting from **Settings → Your data**, and move it to another computer by importing that file.
 
@@ -109,6 +111,31 @@ Both of these are optional. The app is genuinely useful without them.
 | **Web search** | Search the wider web for manuals and specs | Your own [Firecrawl](https://firecrawl.dev) key, added in **Settings → Web search** |
 
 Without either one, adding devices, importing PDFs you own, and reading a manual from a link all still work.
+
+## Add gear from your phone
+
+Your phone cannot browse the catalog, and that is deliberate: the camera on it is a better way to
+write gear down than a keyboard is. Open **Settings → Mobile capture** on the computer, scan the code
+with the phone's camera, and a small page opens:
+
+```text
+   ┌────────────── your phone ──────────────┐
+   │   One device  │  Whole studio          │
+   │   [ Take a photo ]                     │
+   │   "Focusrite · ISA ONE · 95% sure"     │
+   │   [ Add ]  [ Skip ]                    │
+   └────────────────────────────────────────┘
+```
+
+Pick **One device** for a single photo of a front panel or a back panel with the connections, or
+**Whole studio** for a shot of the rack, which can produce several entries at once. Each guess is
+editable before you add it, and anything you add waits as a draft in the library until you check it
+over — tick a batch of them and confirm them in one go.
+
+The reading is done by a local vision model ([Ollama](https://ollama.com/download), about 6 GB the
+first time), so **the photos are never uploaded anywhere**. They stay attached to the device they
+produced, and the only way in is the link in the QR code: anyone on your wifi with that link can add
+gear, so press **New link** in Settings if you ever want to cut them off.
 
 ## Updates look after themselves
 
@@ -170,6 +197,8 @@ The complete list of messages and what to do about each is in [docs/TROUBLESHOOT
 ```
 
 A FastAPI backend with a SQLite catalog, a React front end served from the same origin, and an MCP server over Streamable HTTP at `/mcp` exposing the catalog as read-only tools (`search_equipment`, `get_equipment_specifications`, `find_manuals`, `search_manufacturer_docs`).
+
+Wiring another app to a running AudioBiblica — reading the catalog, or feeding it physical facts back — is documented in [docs/INTEGRATION.md](docs/INTEGRATION.md): topology and pairing, the endpoint reference, the device matcher both sides should share, and the MCP surface for agents.
 
 Run it from source with Python 3.10+ and Node 18+:
 
