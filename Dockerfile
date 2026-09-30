@@ -1,5 +1,5 @@
 # Stage 1 -- build the user interface.
-FROM node:20-slim AS ui
+FROM node:26-slim AS ui
 
 WORKDIR /ui
 
