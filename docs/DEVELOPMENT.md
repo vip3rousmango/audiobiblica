@@ -35,11 +35,9 @@ In the packaged bundle the backend serves the built frontend from the same origi
 
 - **React 18 + TypeScript** with **React Router** for navigation.
 - **`src/pages/`** — `Dashboard.tsx` (Overview), `Library.tsx`, `ResearchAgent.tsx`, `Settings.tsx`, `Mcp.tsx`.
-- **`src/components/`** — `Layout.tsx` (sidebar, header, command palette, health polling), `NanobotChat.tsx` (the AV assistant chat), `SetupChecklist.tsx` (the first-run checklist), `Dropdown.tsx`, `ui.tsx`, `Icon.tsx`.
+- **`src/components/`** — `Layout.tsx` (sidebar, header, command palette, health polling), `NanobotChat.tsx` (the AV assistant chat), `SetupChecklist.tsx` (the first-run checklist), `SetupDoctor.tsx` (the health report and its one-click fixes), `Dropdown.tsx`, `ui.tsx`, `Icon.tsx`.
 - **`src/lib/api.ts`** — the typed API client, including the same-origin base URL and the central error translation described below.
-- **`styles.css`** — the design tokens and every class the app uses. Styling is plain CSS with custom properties; Tailwind is present in `package.json` but is **not** compiled by Vite, so do not use Tailwind utility classes — they render as nothing.
-
-`electron-main.js` is a desktop-development entry point only; there is no packaging configuration for it.
+- **`styles.css`** — the design tokens and every class the app uses. Styling is plain CSS with custom properties and nothing else: there is no Tailwind or PostCSS step, so a utility class would render as nothing.
 
 ### MCP server
 
@@ -56,37 +54,55 @@ Notes that matter when working on it:
 
 ### Nanobot integration (optional, advanced)
 
-Beyond the MCP server, AudioBiblica can integrate with the **nanobot (HKUDS/nanobot)** framework for richer agent reasoning, extra tool access, a chat interface, and automation (for example comparing specifications across several devices or researching hard-to-find legacy documentation).
+AudioBiblica's `nanobot` runtime talks to **nanobot (HKUDS/nanobot)** as its agent. The point of it is tool use: nanobot can call AudioBiblica's own read-only MCP tools (`search_equipment`, `get_equipment_specifications`, `find_manuals`, `search_manufacturer_docs`) to answer questions about your catalog, and it brings its own shell and filesystem tools for everything else.
 
-nanobot is a **Docker-based framework, not a macOS `.dmg`**. Local setup:
+**Which endpoint.** AudioBiblica speaks nanobot's **chat API**, which `nanobot serve` provides (default `127.0.0.1:8900`): `GET /health`, `GET /v1/models`, `POST /v1/chat/completions`. `nanobot gateway` is the separate service that serves chat apps and the WebUI; pointing AudioBiblica at the gateway's port will not answer chat requests. Nanobot's own `docker-compose.yml` runs the API as the `nanobot-api` service (`serve --host 0.0.0.0`), published on `127.0.0.1:8900`.
 
-1. Install Docker Desktop.
-2. Clone and build nanobot:
+**Setup, in this order — the API plugin step is not optional.** Without `nanobot plugins enable api`, `nanobot serve` starts but exposes no HTTP API at all.
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
-cd nanobot
-docker compose build
-docker compose run --rm nanobot-cli onboard
+pip install nanobot-ai            # or use nanobot's container
+nanobot onboard --wizard          # choose a provider and model
+nanobot plugins enable api
+nanobot agent -m "Hello!"         # proves the provider works before serving
+nanobot serve                     # chat API on 127.0.0.1:8900
 ```
 
-3. Configure a provider in `~/.nanobot/config.json`:
+Then set the runtime in **Settings → Assistant → Runtime** to *Nanobot gateway* and check it with the *Test saved assistant* button, or run the health report in **Settings → Check my setup**.
+
+**Model choice matters for an agent, in two ways.** A tool-using agent needs a model that reliably emits tool calls — `llama3.2:3b` answers with the *text* of a call (`{"name": "search_equipment", …}`) and never makes one, while `mistral:latest` calls the tool and reports what it returned. Nanobot's own agent prompt (system instructions plus tool schemas) is several thousand tokens before your message, so give it at least a 16k window; with a smaller one, requests fail with `ContextWindowExceededError` naming the token counts.
+
+**Letting the agent use our tools.** Add this to `~/.nanobot/config.json`. Field names are nanobot's own (snake_case, with `extra="allow"` meaning a camelCase key is silently ignored rather than rejected — so verify, do not assume):
 
 ```json
 {
-  "providers": [
-    { "name": "openai", "api_key": "your-openai-api-key", "models": ["gpt-4"] }
-  ]
+  "tools": {
+    "ssrf_whitelist": ["127.0.0.1/32"],
+    "mcp_servers": {
+      "audiobiblica": {
+        "type": "streamableHttp",
+        "url": "http://127.0.0.1:8000/mcp/",
+        "tool_timeout": 30,
+        "enabled_tools": ["search_equipment", "get_equipment_specifications", "find_manuals", "search_manufacturer_docs"]
+      }
+    }
+  }
 }
 ```
 
-4. Start the gateway and point AudioBiblica at it with `NANOBOT_BASE_URL` (default `http://127.0.0.1:8900`):
+Three things bite here: nanobot's SSRF guard blocks loopback HTTP MCP servers unless the CIDR is whitelisted; the config is read at startup, so restart `nanobot serve` after editing it; and the tools are connected per agent run, not at startup, so a `POST /mcp/` appears in AudioBiblica's log only once the agent actually calls one. AudioBiblica's own `AUDIOBIBLICA_MCP_ALLOWED_HOSTS` default (`127.0.0.1:*`) already accepts a same-origin call.
+
+To check the server side on its own, without an agent in the way:
 
 ```bash
-docker compose up -d nanobot-gateway
+curl -s -X POST http://127.0.0.1:8000/mcp/ -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"search_equipment","arguments":{"query":""}}}'
 ```
 
-The Nanobot WebUI, when enabled, is at `http://localhost:8765`. The integration complements the MCP server rather than replacing it.
+`nanobot serve`'s route to the model is its own: nanobot talks to Ollama's OpenAI-compatible endpoint, where AudioBiblica's `ASSISTANT_NUM_CTX` does not apply, so a slow agent on a laptop is usually Ollama's context length rather than the model (see the troubleshooting entry for the assistant taking a long time).
+
+**Wire protocol notes.** AudioBiblica sends exactly one `user` message per request and no `model`, because nanobot keeps the conversation itself keyed by `session_id`; a system prompt, when there is one, is folded into that user message. This is the one place the two sides have to agree, and `src/backend/services/assistant.py` documents it next to the code.
 
 ## Environment variables
 
@@ -104,6 +120,7 @@ Every variable is read by the backend, except `VITE_API_BASE_URL`, which is read
 | `FIRECRAWL_API_URL` | Firecrawl API base URL. | Firecrawl's public endpoint |
 | `OLLAMA_BASE_URL` | Local model endpoint used as the assistant default. | `http://127.0.0.1:11434` |
 | `NANOBOT_BASE_URL` | Nanobot gateway exposed to the assistant runtime. | `http://127.0.0.1:8900` |
+| `ASSISTANT_NUM_CTX` | Context window requested from a local runtime per request. Ollama otherwise uses the model's full training context (131072 for `llama3.2`), whose KV cache is what makes small models crawl on a laptop. | `8192` |
 | `ASSISTANT_MODEL` | Default assistant model when none is saved in Settings. | `llama3.2:3b` |
 | `ASSISTANT_TIMEOUT` | Seconds to wait for one assistant response. | `180` |
 | `VITE_API_BASE_URL` | Frontend override for the backend origin, read at build time. Empty in a production build, so the UI calls whatever origin served it; `src/frontend/.env.development` sets it to `http://127.0.0.1:8000` for `npm run dev`. | empty (dev: `http://127.0.0.1:8000`) |

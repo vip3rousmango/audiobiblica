@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
+import sqlite3
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -11,9 +13,9 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -34,19 +36,31 @@ from src.backend.services.catalog_archive import (
     build_archive,
     restore_archive,
 )
+from src.backend.services.diagnostics import collect_diagnostics
 from src.backend.services.page_reader import read_page
 from src.backend.services.paths import (
     backup_created_at,
     backup_database,
+    catalog_state,
+    configure_logging,
     data_dir,
     database_path,
     list_backups,
     manuals_dir,
     migrate_legacy_database,
+    recover_catalog,
+    replace_catalog_with,
 )
-from src.backend.services.storage import get_storage
+from src.backend.services.storage import get_storage, invalidate_connections
 
 mcp_server = AudioBiblicaMCPServer()
+logger = logging.getLogger(__name__)
+
+
+# What happened to the catalog at this startup: ``None`` when nothing was wrong.
+# Per-process on purpose — a notice about a file the user has already handled is
+# worse than no notice once the app has restarted cleanly.
+_catalog_recovery: dict | None = None
 
 
 def _manual_directory() -> Path:
@@ -59,8 +73,14 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app):
-        backup_database()
+        global _catalog_recovery
+        configure_logging()
+        # Adopt a legacy catalog first, and only then judge the catalog's health:
+        # recovery runs before the first snapshot so a damaged file can never be
+        # copied over a good one and push it out of the kept set.
         migrate_legacy_database()
+        _catalog_recovery = recover_catalog()
+        backup_database()
         get_storage()
         async with protocol_server.session_manager.run():
             yield
@@ -78,6 +98,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # Registered inside the factory so every consumer (uvicorn, tests) gets it.
+    # Starlette's handler middleware is outermost, so registration order against
+    # the router does not matter; this only has to exist before the app is used.
+    app.add_exception_handler(Exception, unhandled_error)
 
     app.include_router(api_router, prefix="/api/v1")
     app.mount("/mcp", protocol_app)
@@ -104,6 +128,23 @@ def mount_ui(application: FastAPI) -> None:
         if full_path and candidate.is_file() and candidate.is_relative_to(ui_dir):
             return FileResponse(candidate)
         return FileResponse(ui_dir / "index.html")
+
+
+
+
+async def unhandled_error(request: Request, exc: Exception) -> JSONResponse:
+    """Answer an unexpected failure with something the user can quote.
+
+    The traceback goes to the log beside the catalog; the user gets one sentence
+    and a short reference that appears in that traceback, so a support question
+    can be answered from the log alone.
+    """
+    reference = uuid.uuid4().hex[:8]
+    logger.exception("Unhandled error %s on %s %s", reference, request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong on our side.", "reference": reference},
+    )
 
 
 app = create_app()
@@ -230,6 +271,39 @@ def _assistant_settings() -> dict:
         "api_key_configured": bool(config.get("assistant.api_key")),
         "nanobot_api_key_configured": bool(config.get("assistant.nanobot_api_key")),
     }
+
+
+async def _assistant_probe(settings: dict, config) -> dict:
+    """Ask the configured runtime which models it serves. Never raises.
+
+    Shared by the first-run checklist and the health report so the two cannot
+    disagree about whether the assistant is working.
+    """
+    probe = {
+        "runtime": settings["runtime"],
+        "provider": settings["provider"],
+        "model": settings["model"],
+        "reachable": False,
+        "model_available": False,
+        "models": [],
+        "error": None,
+    }
+    try:
+        models = await list_models(
+            runtime=settings["runtime"],
+            provider=settings["provider"],
+            api_key=config.get("assistant.api_key"),
+            local_base_url=settings["local_base_url"],
+            nanobot_url=settings["nanobot_url"],
+            nanobot_api_key=config.get("assistant.nanobot_api_key"),
+        )
+    except AssistantError as exc:
+        probe["error"] = str(exc)
+    else:
+        probe["models"] = models
+        probe["reachable"] = True
+        probe["model_available"] = settings["model"] in models
+    return probe
 
 
 def _knowledge_context(query: str) -> str:
@@ -1015,49 +1089,31 @@ async def pull_assistant_model(payload: ModelPullRequest) -> dict:
 @app.get("/api/v1/setup/status")
 async def setup_status() -> dict:
     """Everything the first-run checklist needs, in one call that never fails."""
-    storage = get_storage()
-    equipment = storage.list_equipment()
+    counts = _catalog_counts(get_storage())
     settings = _assistant_settings()
     config = get_config()
 
-    assistant = {
-        "runtime": settings["runtime"],
-        "provider": settings["provider"],
-        "model": settings["model"],
-        "reachable": False,
-        "model_available": False,
-        "models": [],
-        "pulling": _model_pull["state"],
-        "pull_model": _model_pull["model"],
-        "pull_error": _model_pull["error"],
-        "error": None,
-    }
-    try:
-        models = await list_models(
-            runtime=settings["runtime"],
-            provider=settings["provider"],
-            api_key=config.get("assistant.api_key"),
-            local_base_url=settings["local_base_url"],
-            nanobot_url=settings["nanobot_url"],
-            nanobot_api_key=config.get("assistant.nanobot_api_key"),
-        )
-    except AssistantError as exc:
-        assistant["error"] = str(exc)
-    else:
-        assistant["models"] = models
-        assistant["reachable"] = True
-        assistant["model_available"] = settings["model"] in models
+    assistant = await _assistant_probe(settings, config)
+    assistant.update(
+        pulling=_model_pull["state"],
+        pull_model=_model_pull["model"],
+        pull_error=_model_pull["error"],
+    )
 
     return {
         "data_dir": str(data_dir()),
         "database_path": str(database_path()),
-        "equipment_count": len(equipment),
-        "manual_count": sum(len(item.manuals or []) for item in equipment),
+        "equipment_count": counts["equipment"] if counts else 0,
+        "manual_count": counts["manuals"] if counts else 0,
+        # False when the catalog could not be read at all: the counts above are
+        # then not real, and the checklist must not tell anyone to add a device.
+        "catalog_readable": counts is not None,
         "assistant": assistant,
         "research": {
             "firecrawl_configured": bool(config.firecrawl_api_key or os.getenv("FIRECRAWL_API_KEY")),
             "free_fetch": True,
         },
+        "catalog_recovery": _catalog_recovery,
     }
 
 
@@ -1102,7 +1158,82 @@ async def list_catalog_backups() -> dict:
         "data_dir": str(data_dir()),
         "database_path": str(database_path()),
         "backups": backups,
+        "catalog_recovery": _catalog_recovery,
     }
+
+
+class RestoreRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+@app.post("/api/v1/data/restore")
+async def restore_catalog_backup(payload: RestoreRequest) -> dict:
+    """Replace the live catalog with one of its snapshots."""
+    snapshot = next((path for path in list_backups() if path.name == payload.name), None)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="That backup no longer exists.")
+    if catalog_state(snapshot) != "ok":
+        raise HTTPException(status_code=422, detail="That backup could not be read, so it was not restored.")
+    # Undo-able by construction: whatever is live right now is snapshotted first,
+    # so restoring the wrong backup is itself one restore away from being fixed.
+    # It is legitimately None when there is no catalog yet, and when the live
+    # catalog is too damaged to copy — restoring is then the only way forward.
+    safety = await run_in_threadpool(backup_database)
+    await run_in_threadpool(replace_catalog_with, snapshot)
+    # The file just changed underneath every open connection, so make them reopen
+    # before the next request reads a catalog the process can no longer see.
+    invalidate_connections()
+    get_storage().ensure_schema()
+    logger.info("Restored catalog from %s (safety copy %s)", snapshot.name, safety)
+    return {"restored": snapshot.name, "safety_copy": safety.name if safety else None}
+
+
+@app.post("/api/v1/data/backup")
+async def create_catalog_backup() -> dict:
+    """Take a snapshot on demand, for the health report's one-click fix."""
+    backup = await run_in_threadpool(backup_database)
+    if backup is None:
+        return {"backup": None}
+    try:
+        size_bytes = backup.stat().st_size
+    except OSError:
+        size_bytes = 0
+    return {
+        "backup": {
+            "name": backup.name,
+            "created_at": backup_created_at(backup),
+            "size_bytes": size_bytes,
+        }
+    }
+
+
+def _catalog_counts(storage) -> dict | None:
+    """Counts read from the catalog, or ``None`` when it cannot be read at all.
+
+    A health report that dies with the catalog is useless exactly when it is
+    needed, so every caller of this treats ``None`` as "unknown", never as zero.
+    """
+    try:
+        equipment = storage.list_equipment()
+        return {
+            "equipment": len(equipment),
+            "manuals": sum(len(item.manuals or []) for item in equipment),
+            "findings": sum(len(storage.get_research_findings(item.id)) for item in equipment),
+        }
+    except sqlite3.Error:
+        logger.exception("Could not read catalog counts")
+        return None
+
+
+@app.get("/api/v1/diagnostics")
+async def diagnostics() -> dict:
+    """The app's own health report: what is wrong and what can be done about it."""
+    storage = get_storage()
+    assistant = await _assistant_probe(_assistant_settings(), get_config())
+    return await run_in_threadpool(
+        collect_diagnostics, _catalog_recovery, assistant, _catalog_counts(storage)
+    )
+
 
 
 # Registered last, once every API route above exists.

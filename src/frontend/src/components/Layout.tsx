@@ -157,7 +157,7 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       {mobileOpen && <button className="sidebar-scrim" aria-label="Close navigation" onClick={() => setMobileOpen(false)} />}
       <aside className={`sidebar ${mobileOpen ? 'sidebar-open' : ''}`} aria-label="Application navigation">
         <div className="sidebar-inner">
-          <NavLink to="/" className="brand" aria-label="AudioBiblica overview">
+          <NavLink to="/" className="brand">
             <span className="brand-mark"><Icon name="waveform" size={18} /></span>
             <span className="brand-copy">
               <span className="brand-name">AudioBiblica</span>
@@ -217,13 +217,19 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             </div>
           </div>
           <div className="topbar-actions">
-            <button className="global-search" onClick={() => setPaletteOpen(true)} aria-label="Open command palette">
+            {/* The visible text is the button's name: an aria-label here would
+                have to repeat "Search workspace" to satisfy label-in-name, and a
+                label that disagrees with the visible text is the actual failure. */}
+            <button className="global-search" onClick={() => setPaletteOpen(true)}>
               <Icon name="search" size={15} />
               <span>Search workspace</span>
-              <span className="keyboard-hint">⌘ K</span>
+              <span className="keyboard-hint" aria-hidden="true">⌘ K</span>
             </button>
             <div className="topbar-divider" aria-hidden="true" />
-            <button className="avatar" aria-label="Open profile menu" onClick={() => navigate('/settings')}>AV</button>
+            {/* A gear, not the "AV" initials: an icon-only button's label cannot
+                disagree with text it does not have, and this one goes to Settings.
+                The workspace identity stays in the sidebar's own chip. */}
+            <button className="avatar" aria-label="Open settings" onClick={() => navigate('/settings')}><Icon name="settings" size={16} /></button>
             <span className="system-health"><StatusDot tone={serviceState === 'online' ? 'success' : serviceState === 'offline' ? 'danger' : 'neutral'} label={serviceState === 'online' ? 'API online' : serviceState === 'offline' ? 'API offline' : 'Checking API'} /></span>
           </div>
         </header>

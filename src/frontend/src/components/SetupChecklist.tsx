@@ -58,10 +58,40 @@ const SetupChecklist: React.FC = () => {
   const deviceCount = status.equipment_count;
   const manualCount = status.manual_count;
   const { assistant } = status;
-  if (deviceCount > 0 && manualCount > 0 && assistant.model_available) return null;
 
+  /* Kept even when the setup checklist itself is finished: a catalog that had to
+     be repaired is exactly the moment the user needs to be told, and the notice
+     clears by itself on the next clean start. */
+  const recovery = status.catalog_recovery;
+  const recoveryNotice = recovery && (
+    <InlineNotice tone="warning" icon="refresh">
+      {recovery.action === 'restored'
+        ? `Your catalog could not be read, so AudioBiblica restored the copy from ${new Date(recovery.at).toLocaleString()}. The damaged file was kept at ${recovery.broken_file}.`
+        : `Your catalog could not be read and no usable backup was found, so AudioBiblica started with an empty one. The damaged file was kept at ${recovery.broken_file}.`}
+    </InlineNotice>
+  );
+  const complete = deviceCount > 0 && manualCount > 0 && assistant.model_available;
+  if (complete && !recovery) return null;
+
+  /* An unreadable catalog means the step counts above are not real, so the only
+     honest thing to show is where to fix it. */
+  if (!status.catalog_readable) {
+    return (
+      <>
+        {recoveryNotice}
+        <InlineNotice tone="danger" icon="x">
+          AudioBiblica cannot read your catalog right now, so it cannot show your gear. Open Settings → Check my setup to fix it.
+        </InlineNotice>
+      </>
+    );
+  }
+
+  if (complete) {
+    return <>{recoveryNotice}</>;
+  }
   return (
     <Surface className="setup-checklist">
+      {recoveryNotice}
       <div className="surface-header">
         <div className="surface-title">
           <Icon name="check" size={17} />

@@ -40,9 +40,16 @@ If nothing here helps, the exact wording you saw will help whoever you ask; the 
 
 **What you see:** `The assistant is still thinking. The first answer after a download can take a minute.`
 
-**Why:** the model has to load into memory the first time. This is normal and only happens once per session.
+**Why:** the model has to load into memory the first time. That is normal and only happens once per
+session. A long question — the health report in **Check my setup** is a long one — also takes longer
+to read than a short one.
 
-**Fix:** wait a minute and ask again. Later answers are much faster. If it never finishes, check that Ollama is still running.
+**Fix:** wait a minute and ask again; later answers are much faster. AudioBiblica already asks Ollama
+for a small context window on every request, because Ollama otherwise sizes a model for its full
+training context (131072 tokens for `llama3.2`), and that is what makes a small model take minutes on
+a laptop. If answers are still slow, set `ASSISTANT_NUM_CTX` to something smaller (4096) or choose a
+smaller model in **Settings → Assistant**; if they never finish at all, check that Ollama is running
+and raise `ASSISTANT_TIMEOUT` (seconds, default 180).
 
 ## Something went wrong, but your catalog is safe
 

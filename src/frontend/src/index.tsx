@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './styles.css';
 import App from './App';
+import { Button } from './components/ui';
 
 interface ErrorBoundaryState {
   error: Error | null;
@@ -25,8 +26,19 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
         <h1>AudioBiblica hit a rendering error</h1>
         <p>{this.state.error.message || 'An unexpected error interrupted the interface.'}</p>
         <div className="crash-panel-actions">
-          <button type="button" className="btn btn-secondary" onClick={() => this.setState({ error: null })}>Try again</button>
-          <button type="button" className="btn btn-primary" onClick={() => window.location.reload()}>Reload the app</button>
+          <Button type="button" variant="secondary" size="md" onClick={() => this.setState({ error: null })}>Try again</Button>
+          <Button type="button" variant="primary" size="md" onClick={() => window.location.reload()}>Reload the app</Button>
+          {/* Best effort: a crashed page still needs a way to hand over the
+              failure when the on-screen message is all the user has. */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="md"
+            icon="copy"
+            onClick={() => { void navigator.clipboard.writeText(this.state.error?.stack || String(this.state.error)); }}
+          >
+            Copy error details
+          </Button>
         </div>
       </div>
     );

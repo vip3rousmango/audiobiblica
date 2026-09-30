@@ -76,6 +76,18 @@ class StoredManualDocument:
     content_text: str
 
 
+#: Bumped whenever the catalog file is replaced under the app. A connection caches
+#: the file's header, so an open one keeps failing on the old contents until it is
+#: reopened; comparing this integer costs nothing per query.
+_catalog_generation = 0
+
+
+def invalidate_connections() -> None:
+    """Force every thread to reopen the catalog on its next use."""
+    global _catalog_generation
+    _catalog_generation += 1
+
+
 class Storage:
     """Thread-safe SQLite storage for equipment and manuals."""
 
@@ -85,11 +97,23 @@ class Storage:
         self._local = threading.local()
         self._init_db()
 
+    def ensure_schema(self) -> None:
+        """Re-apply the schema and column migrations (idempotent).
+
+        A restored snapshot can predate columns added since it was taken; running
+        the migration again is how it catches up without a private call.
+        """
+        self._init_db()
+
     def _get_conn(self) -> sqlite3.Connection:
-        if not hasattr(self._local, "conn") or self._local.conn is None:
+        stale = getattr(self._local, "generation", None) != _catalog_generation
+        if not hasattr(self._local, "conn") or self._local.conn is None or stale:
+            if getattr(self._local, "conn", None) is not None:
+                self._local.conn.close()
             self._local.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
             self._local.conn.row_factory = sqlite3.Row
             self._local.conn.execute("PRAGMA foreign_keys = ON")
+            self._local.generation = _catalog_generation
         return self._local.conn
 
     def _init_db(self) -> None:

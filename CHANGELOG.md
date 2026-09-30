@@ -37,14 +37,36 @@ First public release.
   your catalog.
 - Web UI: overview, library with import/edit/archive/delete, research agent, AV assistant, advanced
   tools and settings.
+- Automatic recovery from a damaged catalog: startup checks the catalog, keeps the damaged file as
+  `audiobiblica-broken-<timestamp>.db`, and restores the newest snapshot that still opens (or starts
+  empty and says so). Unreadable files are reported instead, never moved.
+- One-click restore of any snapshot from **Settings → Your data**, which snapshots what is live first
+  so a restore is itself undoable (`POST /api/v1/data/restore`).
+- **Settings → Check my setup**: a health report of the catalog, the backups, the assistant runtime
+  and model, and the imported PDFs, with the fix that applies to each problem, a copyable report, and
+  "Ask the assistant to explain this" for a plain-language reading of it.
+- A rotating application log in the data directory (`audiobiblica.log`) and a reference on every
+  unexpected failure, so a user can quote one short code and it appears next to the traceback.
 
 ### Changed
 
+- Snapshots are consistent copies taken through SQLite rather than file copies, so a snapshot can no
+  longer be torn by a write in progress, and two snapshots in the same second no longer overwrite
+  each other.
+- The Nanobot runtime now speaks nanobot's actual chat API: one user message per request, no `model`
+  field, with any system prompt folded into that message. It previously sent the whole conversation
+  with a system role and `model: "nanobot"`, which nanobot rejects.
+- The assistant's explanation of a health report is sent as a digest, so it fits a chat message.
 - The default assistant model is `llama3.2:3b` (was `llama3.1`).
 - The default research path needs no API key; Firecrawl remains an optional accelerator.
 - The UI no longer downloads web fonts, so it renders identically offline.
 - The default SQLite catalog moved out of the working directory into the data directory. An existing
   `./audiobiblica.db` is copied there on first start and left in place.
+- The first screen meets WCAG AA contrast and label rules, and the crash panel's recovery buttons are
+  styled by the real button component.
+- The frontend no longer installs Electron, Tailwind or PostCSS — nothing compiled or ran them.
+- `.github/workflows` actions are pinned to current majors, so CI no longer warns about deprecated
+  Node 20 runtimes, and Dependabot now watches the workflow pins.
 
 ### Removed
 

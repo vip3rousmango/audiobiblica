@@ -23,6 +23,21 @@ def _timeout() -> httpx.Timeout:
         read = 180.0
     return httpx.Timeout(read, connect=8.0)
 
+def _num_ctx() -> int:
+    """The context window to ask a local runtime for, per request.
+
+    Ollama sizes a model's KV cache from its context length, and recent versions
+    default to the model's full training context (131072 tokens for llama3.2).
+    That cache is what turns a 3B model into a minutes-long answer on a laptop,
+    and it is chosen per request, so asking for a smaller one costs nothing: the
+    largest prompt this app sends — a system prompt with catalog context plus one
+    user message — is a few thousand tokens at most.
+    """
+    try:
+        return int(os.getenv("ASSISTANT_NUM_CTX", "8192"))
+    except ValueError:
+        return 8192
+
 
 async def _post_json(url: str, *, headers: dict[str, str], payload: dict[str, Any]) -> dict[str, Any]:
     try:
@@ -66,11 +81,21 @@ async def chat_completion(
 ) -> str:
     """Generate one assistant response without exposing configured credentials."""
     if runtime == "nanobot":
+        # Nanobot's OpenAI-compatible API takes exactly one user message and keeps
+        # the conversation itself, keyed by session_id. It has no system role and no
+        # per-request model: an omitted model means "use the configured agent
+        # preset", and "nanobot" is not a model id (GET /v1/models lists the real
+        # ones). Sending the whole history here is what broke this runtime before.
         url = f"{nanobot_url.rstrip('/')}/v1/chat/completions"
+        prompt = "\n\n".join(item["content"] for item in messages if item["role"] == "system")
+        last_user = next((item["content"] for item in reversed(messages) if item["role"] == "user"), "")
+        content = f"{prompt}\n\n{last_user}" if prompt else last_user
+        if not content:
+            raise AssistantError("The assistant request had no message to send")
         result = await _post_json(
             url,
-            headers=_bearer(nanobot_api_key),
-            payload={"model": "nanobot", "messages": messages, "session_id": session_id, "stream": False},
+            headers={**_bearer(nanobot_api_key), "Content-Type": "application/json"},
+            payload={"messages": [{"role": "user", "content": content}], "session_id": session_id, "stream": False},
         )
         try:
             return result["choices"][0]["message"]["content"]
@@ -110,7 +135,13 @@ async def chat_completion(
 
     if provider == "Local":
         base_url = local_base_url.rstrip("/") or os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-        payload = {"model": model, "messages": messages, "stream": False, "options": {"num_predict": 1200}}
+
+        payload = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": {"num_predict": 1200, "num_ctx": _num_ctx()},
+        }
         # Ollama drops the connection while loading a cold model; a local retry costs nothing.
         result = None
         for attempt in range(2):

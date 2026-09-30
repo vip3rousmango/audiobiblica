@@ -145,6 +145,20 @@ export interface SetupStatus {
   manual_count: number;
   assistant: AssistantSetupState;
   research: { firecrawl_configured: boolean; free_fetch: boolean };
+  catalog_recovery: CatalogRecovery | null;
+  /* False when the catalog could not be read at all; the counts are then zeros
+     that mean "unknown", not "empty". */
+  catalog_readable: boolean;
+}
+
+/* What happened to the catalog at this startup, or null when nothing was wrong.
+   Set by the backend's own recovery pass: the notice clears on the next clean
+   start, so it can never describe a file the user has already dealt with. */
+export interface CatalogRecovery {
+  action: 'restored' | 'started_empty';
+  broken_file: string;
+  restored_from: string | null;
+  at: string;
 }
 
 
@@ -159,6 +173,7 @@ export interface DataStatus {
   data_dir: string;
   database_path: string;
   backups: BackupEntry[];
+  catalog_recovery: CatalogRecovery | null;
 }
 
 
@@ -228,10 +243,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    const body = await response.json().catch(() => ({})) as { detail?: string; error?: string };
+    const body = await response.json().catch(() => ({})) as { detail?: string; error?: string; reference?: string };
     const technical = body.detail || body.error || `HTTP ${response.status} from ${method} ${path}`;
-    console.debug(`[audiobiblica] ${method} ${path} -> ${response.status}: ${technical}`);
-    throw new ApiError(friendlyMessage(response.status, technical), response.status, technical);
+    /* The backend marks every unexpected failure with a short reference that also
+       appears in its log, so the user can quote one thing and we can find the
+       traceback. Appended rather than shown raw, and kept out of `technical`. */
+    const message = friendlyMessage(response.status, technical) + (body.reference ? ` (Ref ${body.reference})` : '');
+    console.debug(`[audiobiblica] ${method} ${path} -> ${response.status}: ${technical}`, body.reference ?? '');
+    throw new ApiError(message, response.status, technical);
   }
 
   return response.json() as Promise<T>;
@@ -267,6 +286,66 @@ export async function importCatalog(file: File): Promise<ImportCounts> {
   body.append('file', file);
   return request<ImportCounts>('/api/v1/data/import', { method: 'POST', body });
 }
+
+/* Replace the catalog with one of its own snapshots. The backend snapshots what
+   is live before it swaps, so this is undoable by repeating it with the copy it
+   names as `safety_copy`. */
+export async function restoreBackup(name: string): Promise<{ restored: string; safety_copy: string | null }> {
+  return request('/api/v1/data/restore', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+export async function createBackup(): Promise<{ backup: BackupEntry | null }> {
+  return request('/api/v1/data/backup', { method: 'POST' });
+}
+
+/* One fixed action a check can offer. `kind` says which control to wire it to;
+   everything else is wording the backend chose, so the interface never has to
+   invent a fix for a problem it did not diagnose. */
+interface DiagnosticFix {
+  kind: 'restore' | 'backup_now' | 'open_settings' | 'download_model';
+  label: string;
+  name?: string;
+  model?: string;
+  section?: string;
+}
+
+
+export interface DiagnosticCheck {
+  id: string;
+  level: 'ok' | 'warn' | 'fail';
+  title: string;
+  detail: string;
+  fix: DiagnosticFix | null;
+}
+
+export interface Diagnostics {
+  app_version: string;
+  python: string;
+  platform: string;
+  data_dir: string;
+  database_path: string;
+  database_state: string;
+  catalog_recovery: CatalogRecovery | null;
+  /* null when the catalog could not be read: unknown, never zero. */
+  counts: { equipment: number | null; manuals: number | null; findings: number | null };
+  backups: BackupEntry[];
+  assistant: {
+    runtime: string;
+    provider: string;
+    model: string;
+    reachable: boolean;
+    model_available: boolean;
+    error: string | null;
+  };
+  research: { firecrawl_configured: boolean; free_fetch: boolean };
+  checks: DiagnosticCheck[];
+  recent_errors: string[];
+}
+
+export async function getDiagnostics(): Promise<Diagnostics> {
+  return request<Diagnostics>('/api/v1/diagnostics');
+}
+
 export async function clearAssistantCredential(runtime: 'builtin' | 'nanobot'): Promise<void> {
   await request(`/api/v1/config/assistant/credentials/${runtime}`, { method: 'DELETE' });
 }

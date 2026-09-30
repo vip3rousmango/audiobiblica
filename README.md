@@ -106,6 +106,8 @@ npm run dev
 
 The development server runs on http://localhost:5173 and talks to the backend on port 8000.
 
+The Python package on PyPI is the API and the MCP server only — it has no user interface of its own. The app a musician runs is the container image, which serves the built frontend and the API from one port.
+
 ## License
 
 AudioBiblica is open source under the MIT License. See [LICENSE](LICENSE).

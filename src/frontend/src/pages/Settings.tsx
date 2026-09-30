@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AssistantConfig, clearAssistantCredential, DataStatus, getApiBaseUrl, getAssistantConfig, getDataStatus, getMcpStatus, getSetupStatus, importCatalog, listAssistantModels, pullModel, saveAssistantConfig, testAssistantConnection } from '../lib/api';
+import { AssistantConfig, clearAssistantCredential, createBackup, DataStatus, getApiBaseUrl, getAssistantConfig, getDataStatus, getMcpStatus, getSetupStatus, importCatalog, listAssistantModels, pullModel, restoreBackup, saveAssistantConfig, testAssistantConnection } from '../lib/api';
 import { Icon } from '../components/Icon';
+import SetupDoctor, { SettingsSection } from '../components/SetupDoctor';
 import { Button, InlineNotice, PageHeader, StatusDot } from '../components/ui';
 
 type Provider = AssistantConfig['provider'];
@@ -225,6 +226,37 @@ const Settings: React.FC = () => {
     }
   };
 
+  /* One restore path for the whole app: the backups list and the health report's
+     "restore" fix both land here, so the confirmation is worded once. The reload
+     is deliberate — everything on screen was read from the catalog being replaced. */
+  const restoreSnapshot = async (name: string) => {
+    if (!window.confirm(`Replace your current catalog with the copy from ${name}? A safety copy of the current catalog is taken first.`)) return;
+    setDataBusy(true);
+    setDataMsg('');
+    try {
+      const result = await restoreBackup(name);
+      setDataMsg(`Restored ${result.restored}. Reloading…`);
+      window.location.reload();
+    } catch (caught) {
+      setDataMsg(caught instanceof Error ? caught.message : 'That backup could not be restored.');
+      setDataBusy(false);
+    }
+  };
+
+  const backupNow = async () => {
+    setDataBusy(true);
+    setDataMsg('');
+    try {
+      const result = await createBackup();
+      await refreshDataStatus();
+      setDataMsg(result.backup ? `Copied your catalog to ${result.backup.name}.` : 'There is nothing to copy yet.');
+    } catch (caught) {
+      setDataMsg(caught instanceof Error ? caught.message : 'The copy could not be taken.');
+    } finally {
+      setDataBusy(false);
+    }
+  };
+
   const save = async () => {
     const e: Record<string, string> = {};
     if (data.provider !== 'Local' && data.apiKey && data.apiKey.length < 10) e.apiKey = 'API key appears invalid';
@@ -379,9 +411,10 @@ const Settings: React.FC = () => {
     { id: 'web-search', label: 'Web search (optional)', icon: 'globe' as const },
     { id: 'advanced', label: 'Advanced', icon: 'server' as const },
     { id: 'your-data', label: 'Your data', icon: 'database' as const },
+    { id: 'doctor', label: 'Check my setup', icon: 'activity' as const },
   ] as const;
 
-  const [activeSection, setActiveSection] = useState<'assistant' | 'web-search' | 'advanced' | 'your-data'>(sections[0].id);
+  const [activeSection, setActiveSection] = useState<SettingsSection>(sections[0].id);
 
   return (
     <>
@@ -454,7 +487,14 @@ const Settings: React.FC = () => {
                 <input type="file" accept=".zip,application/zip" className="sr-only" disabled={dataBusy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCatalogFile(file); event.target.value = ''; }} />
               </label>
             </div>
-            {dataMsg && <InlineNotice tone={dataMsg.startsWith('Imported') ? 'success' : 'danger'} icon={dataMsg.startsWith('Imported') ? 'check' : 'x'}>{dataMsg}</InlineNotice>}
+            {/* Every one of these messages is either a completed action or a
+                sentence from the API, so the leading verb decides the tone. */}
+            {dataMsg && <InlineNotice tone={/^(Imported|Copied|Restored)/.test(dataMsg) ? 'success' : 'danger'} icon={/^(Imported|Copied|Restored)/.test(dataMsg) ? 'check' : 'x'}>{dataMsg}</InlineNotice>}
+            {dataStatus?.catalog_recovery && <InlineNotice tone="warning" icon="refresh">
+              {dataStatus.catalog_recovery.action === 'restored'
+                ? `Your catalog could not be read, so AudioBiblica restored the copy from ${new Date(dataStatus.catalog_recovery.at).toLocaleString()}. The damaged file was kept at ${dataStatus.catalog_recovery.broken_file}.`
+                : `Your catalog could not be read and no usable backup was found, so AudioBiblica started with an empty one. The damaged file was kept at ${dataStatus.catalog_recovery.broken_file}.`}
+            </InlineNotice>}
             <h3 style={{ fontSize: '.78rem', marginBlockStart: 20 }}>Automatic backups</h3>
             {dataStatus && dataStatus.backups.length > 0 ? (
               <ul className="backup-list">
@@ -463,13 +503,20 @@ const Settings: React.FC = () => {
                     <span>{new Date(backup.created_at).toLocaleString()}</span>
                     <code>{backup.name}</code>
                     <span>{Math.round(backup.size_bytes / 1024)} KB</span>
+                    <Button size="sm" variant="ghost" icon="refresh" disabled={dataBusy} onClick={() => void restoreSnapshot(backup.name)}>Restore</Button>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="field-help">A copy is saved here every time AudioBiblica starts.</p>
+              <p className="field-help">A copy is saved here every time AudioBiblica starts, so there is always something to go back to.</p>
             )}
+            <div className="form-actions" style={{ marginBlockStart: 14 }}>
+              <Button size="sm" variant="secondary" icon="package" disabled={dataBusy} onClick={() => void backupNow()}>Back up now</Button>
+            </div>
           </section>}
+          {activeSection === 'doctor' && (
+            <SetupDoctor onRestore={restoreSnapshot} onOpenSection={setActiveSection} onToast={showToast} />
+          )}
         </div>
       </div>
     </>
