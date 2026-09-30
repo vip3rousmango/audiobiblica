@@ -68,7 +68,11 @@ echo "Waiting for AudioBiblica to be ready..."
 for _ in $(seq 1 90); do
   if health="$(curl -fsS http://localhost:8000/health 2>/dev/null)"; then
     version="$(printf '%s' "$health" | sed -n 's/.*"version"[: ]*"\([^"]*\)".*/\1/p')"
-    echo "AudioBiblica ${version:-}is running. Opening http://localhost:8000"
+    if [ -n "$version" ]; then
+      echo "AudioBiblica $version is running. Opening http://localhost:8000"
+    else
+      echo "AudioBiblica is running. Opening http://localhost:8000"
+    fi
     if command -v open >/dev/null 2>&1; then
       open http://localhost:8000
     elif command -v xdg-open >/dev/null 2>&1; then
