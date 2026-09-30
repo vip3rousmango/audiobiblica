@@ -37,6 +37,8 @@ Your data lives in one folder, `~/.audiobiblica` by default:
 - `config.json` — your settings, including any API keys you have entered. It is readable only by your user account.
 - `manuals/` — the PDF manuals you have imported.
 - `backups/` — automatic safety copies of your catalog, taken every time the app starts. The ten most recent are kept and older ones are removed.
+- `audiobiblica.log` — what the app did, kept to the last few hundred lines. If something goes wrong the app shows a short reference (for example `Ref 4f2a9c31`) and the matching traceback is in here.
+- `audiobiblica-broken-<date>.db` — only ever appears if your catalog was damaged and had to be replaced; the damaged file is kept here rather than deleted, in case you want it.
 
 When you run the Docker bundle, the same folder is a Docker volume named `audiobiblica_data` instead of a visible folder on your desktop. If you want it somewhere specific, set the `AUDIOBIBLICA_DATA_DIR` environment variable to the path you prefer.
 
@@ -77,6 +79,7 @@ If you used the app directly, delete the folder `~/.audiobiblica`. This is perma
 
 - **The page will not open.** Make sure Docker Desktop is running, then run `./scripts/audiobiblica` again.
 - **The assistant says its model is not installed.** Open **Settings**, choose the **Assistant** section, and download the model. It needs Ollama installed and running on your computer.
+- **Something looks wrong and you are not sure what.** Open **Settings → Check my setup**. It inspects the catalog, the backups, the assistant and your imported PDFs, tells you what it found in plain language, and offers the fix where there is one.
 - **Web search does nothing.** That feature needs a Firecrawl key. Everything else works without one.
 - **The assistant is slow the first time.** The first answer after a model download can take a minute while the model loads. Later answers are quicker.
 
