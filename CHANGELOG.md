@@ -7,7 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- The README is a landing page now: real screenshots, plain language, and the developer material
+  moved to the end behind a link.
 
 ## [0.1.0] - 2026-09-30
 
