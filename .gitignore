@@ -12,6 +12,10 @@ eggs/
 .eggs/
 lib/
 lib64/
+
+# The Python template above ignores any directory called lib/, which would also
+# drop the frontend's own src/lib. Keep that one tracked.
+!src/frontend/src/lib/
 parts/
 sdist/
 var/
