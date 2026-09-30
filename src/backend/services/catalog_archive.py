@@ -23,7 +23,7 @@ from src.backend.services.storage import Storage
 #: Bumped only when the archive layout changes in a way import must understand.
 SCHEMA_VERSION = 1
 #: Kept in step with ``pyproject.toml``.
-APP_VERSION = "0.1.1"
+APP_VERSION = "0.1.2"
 
 #: The one message a user sees for any unreadable file.
 NOT_OURS = "This file wasn't exported by AudioBiblica."
@@ -148,6 +148,7 @@ def _restore_record(
                 manuals=list(existing.manuals or []),
                 research_findings=list(existing.research_findings or []),
                 archived=bool(existing.archived),
+                review_state=existing.review_state,
             )
         )
         counts["equipment_updated"] += 1

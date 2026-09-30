@@ -9,6 +9,37 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [0.1.2] - 2026-09-30
+
+### Added
+
+- **Capture gear with your phone.** The desktop shows a QR code in **Settings → Mobile capture**;
+  scanning it with the phone's camera opens a small page built for a rack — one device or a whole
+  studio in a single shot. The photo is read by a vision model on your own computer (`qwen2.5vl:7b`
+  by default, one click to download), the guesses come back as editable cards, and what you add
+  waits in the library as a draft until you check it over. The pairing link is dropped from the phone's
+  address bar as soon as the page opens, so a screenshot or a shared tab carries no token.
+- Photos stay attached to the device they produced, in its record, next to the manuals — and are
+  never uploaded anywhere: the reading happens on the machine that already holds the catalog.
+- **Needs review**: a banner in the library counts what a capture added, a filter shows only those
+  devices, and ticking a batch of them confirms, re-categorises, archives or deletes the lot in one
+  request.
+- `docs/INTEGRATION.md`: the reference for wiring another local app to a running AudioBiblica —
+  topology and pairing, the endpoint list, the device matcher both sides should share, the MCP
+  surface for agents, and the planned contracts for the studio console and Live Sessions.
+
+### Changed
+
+- The app can be reached from another machine on the wifi, so the catalog is now gated: anything
+  that does not come from this computer has to present the pairing token (the link in
+  **Settings → Mobile capture**, or the cookie it sets). Nothing is exempt — `/health` included.
+- Browser access is an allow-list (this computer and its address on the local network) rather than
+  `*`, and a browser's preflight is still answered without a credential.
+- The capture page renders outside the desktop shell, so a phone gets one column instead of a
+  sidebar it cannot use.
+- `/health` reports the version from the one place it is declared, so it can no longer disagree with
+  the image that is running.
+
 ## [0.1.1] - 2026-09-30
 
 ### Added
@@ -95,6 +126,7 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.2
 [0.1.1]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.1
 [0.1.0]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.0
