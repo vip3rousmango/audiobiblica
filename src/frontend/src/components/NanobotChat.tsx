@@ -1,108 +1,109 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { FormEvent, useEffect, useRef, useState } from 'react';
+import { getAssistantConfig, sendAssistantChat, testAssistantConnection } from '../lib/api';
+import { Icon } from './Icon';
+import { Button, InlineNotice, PageHeader, StatusDot } from './ui';
 
-interface Message { role: string; content: string; }
+interface Message {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+const starterPrompts = [
+  'Compare two compressors for a vocal chain',
+  'What should I check when a monitor sounds dull?',
+  'Find the manual for a piece of legacy gear',
+  'Help me design a clean drum tracking signal path',
+];
 
 const NanobotChat: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [nanobotAvailable, setNanobotAvailable] = useState<boolean>(false);
-  const [nanobotBaseUrl, setNanobotBaseUrl] = useState<string>('http://localhost:8000');
+  const [sending, setSending] = useState(false);
+  const [runtime, setRuntime] = useState<'builtin' | 'nanobot'>('builtin');
+  const [runtimeLabel, setRuntimeLabel] = useState('Assistant service');
+  const [connection, setConnection] = useState<'checking' | 'connected' | 'offline'>('checking');
+  const [connectionMessage, setConnectionMessage] = useState('Checking the configured assistant service…');
+  const [sendError, setSendError] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const sessionId = useRef(crypto.randomUUID());
 
   useEffect(() => {
-    fetch(`${nanobotBaseUrl}/mcp`)
-      .then(res => { if (res.ok) setNanobotAvailable(true); })
-      .catch(() => setNanobotAvailable(false));
-  }, [nanobotBaseUrl]);
-
-  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  useEffect(() => { scrollToBottom(); }, [messages]);
-
-  const send = async () => {
-    if (!input.trim()) return;
-    const userMsg: Message = { role: 'user', content: input };
-    setMessages((prev) => [...prev, userMsg]);
-    setInput('');
-    setLoading(true);
-
-    try {
-      if (nanobotAvailable) {
-        const res = await fetch(`${nanobotBaseUrl}/mcp`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tool_name: 'agent', arguments: { message: input } }),
-        });
-        const data = await res.json();
-        if (data.response) {
-          setMessages((prev) => [...prev, { role: 'assistant', content: data.response }]);
-          return;
-        }
+    let active = true;
+    void getAssistantConfig().then(async (config) => {
+      if (!active) return;
+      setRuntime(config.runtime);
+      setRuntimeLabel(config.runtime === 'nanobot' ? 'Nanobot agent' : `${config.provider} model`);
+      try {
+        const status = await testAssistantConnection();
+        if (!active) return;
+        setConnection('connected');
+        setConnectionMessage(status.message);
+      } catch (caught) {
+        if (!active) return;
+        setConnection('offline');
+        setConnectionMessage(caught instanceof Error ? caught.message : 'The selected assistant is unavailable.');
       }
-      const res = await fetch(`${nanobotBaseUrl}/api/v1/mcp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tool_name: 'search_equipment', arguments: { query: input } }),
+    }).catch((caught) => {
+      if (!active) return;
+      setConnection('offline');
+      setConnectionMessage(caught instanceof Error ? caught.message : 'Could not load assistant settings.');
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [messages, sending]);
+
+  const send = async (event?: FormEvent) => {
+    event?.preventDefault();
+    const prompt = input.trim();
+    if (!prompt || sending) return;
+    const userMessage: Message = { id: crypto.randomUUID(), role: 'user', content: prompt };
+    const conversation = [...messages, userMessage].slice(-20);
+    setMessages(conversation);
+    setInput('');
+    setSending(true);
+    setSendError('');
+    try {
+      const result = await sendAssistantChat({
+        runtime,
+        messages: conversation.map(({ role, content }) => ({ role, content })),
+        session_id: sessionId.current,
       });
-      const data = await res.json();
-      let content = 'Equipment search results:\n' + JSON.stringify(data, null, 2);
-      if (data.response) content = data.response;
-      else if (data.mcp?.data?.equipment?.length) content = data.mcp.data.equipment.map((eq: unknown) => (eq as Record<string, unknown>).title || (eq as Record<string, unknown>).name || (eq as Record<string, unknown>).id).join('\n');
-      else if (data.mcp?.data?.specifications) content = JSON.stringify(data.mcp.data.specifications, null, 2);
-      setMessages((prev) => [...prev, { role: 'assistant', content }]);
-    } catch {
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'Error — ensure backend and nanobot are running.' }]);
+      setMessages((current) => [...current, { id: crypto.randomUUID(), role: 'assistant', content: result.answer }]);
+      setConnection('connected');
+      setConnectionMessage('Assistant response received.');
+    } catch (caught) {
+      // A failed request is never an assistant answer: say so beside the composer.
+      const error = caught instanceof Error ? caught.message : 'The configured assistant could not answer this request.';
+      setSendError(error);
+      setConnection('offline');
+      setConnectionMessage('The last message was not answered.');
+    } finally {
+      setSending(false);
     }
-    setLoading(false);
   };
 
   return (
-    <div className="max-w-3xl mx-auto h-[calc(100vh-180px)] flex flex-col bg-slate-900/50 rounded-2xl border border-slate-800 overflow-hidden">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/50">
-        <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${nanobotAvailable ? 'bg-green-500' : 'bg-amber-500'}`} />
-          <span>{nanobotAvailable ? 'AI Agent Connected' : 'Equipment Search Mode'}</span>
-        </h2>
-        <span className="text-xs text-slate-400">MCP: {nanobotBaseUrl}</span>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 space-y-6" ref={messagesEndRef}>
-        {messages.length === 0 && (
-          <div className="text-center text-slate-500 py-12">
-            <svg className="w-16 h-16 mx-auto text-slate-700 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-            <p className="text-lg font-medium">Ask about audio equipment</p>
-            <p className="text-sm mt-1">Try: <span className="font-mono text-amber-400">"Compare Pultec EQP-1A vs EQP-2A"</span></p>
+    <>
+      <PageHeader eyebrow="AV intelligence" title="Assistant workspace" description="Ask questions in studio language. Responses use the selected model or Nanobot agent, grounded in your equipment records and imported manuals." actions={<Button variant="secondary" icon="settings" onClick={() => window.location.assign('/settings')}>Configure assistant</Button>} />
+      {connection === 'offline' && <InlineNotice tone="warning" icon="plug">{connectionMessage} Check the assistant runtime in Settings.</InlineNotice>}
+      <div className="assistant-layout" style={{ marginBlockStart: connection === 'offline' ? 16 : 0 }}>
+        <section className="assistant-main" aria-label="Assistant conversation">
+          <header className="assistant-header"><div className="assistant-title"><span className="assistant-orb"><Icon name="sparkles" size={16} /></span><div><strong>AudioBiblica assistant</strong><span><StatusDot tone={connection === 'connected' ? 'success' : connection === 'offline' ? 'warning' : 'neutral'} label={connection === 'connected' ? `${runtimeLabel} ready` : connection === 'offline' ? 'Assistant unavailable' : 'Checking assistant'} /></span></div></div><span className="tag">{runtime === 'nanobot' ? 'Agent gateway' : 'Grounded model chat'}</span></header>
+          <div className="assistant-messages" aria-live="polite">
+            {messages.length === 0 ? <div className="assistant-welcome"><span className="assistant-orb"><Icon name="waveform" size={22} /></span><h2>What are you solving today?</h2><p>Responses are generated by the configured assistant and include available AudioBiblica equipment and manual context.</p><div className="prompt-grid">{starterPrompts.map((prompt) => <button className="prompt-chip" key={prompt} onClick={() => setInput(prompt)}>{prompt}</button>)}</div></div> : messages.map((message) => <div className={`chat-message ${message.role === 'user' ? 'chat-message-user' : ''}`} key={message.id}><span className="chat-avatar"><Icon name={message.role === 'user' ? 'circle' : 'sparkles'} size={13} /></span><div className="chat-bubble">{message.content}</div></div>)}
+            {sending && <div className="chat-message"><span className="chat-avatar"><Icon name="sparkles" size={13} /></span><div className="chat-bubble">Waiting for the assistant… <span style={{ color: 'var(--muted)' }}>Local models can take up to a minute, especially on the first question.</span></div></div>}
+            <div ref={messagesEndRef} />
           </div>
-        )}
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] px-4 py-3 rounded-2xl ${m.role === 'user' ? 'bg-amber-500 text-slate-950' : 'bg-slate-800 text-slate-100'}`}>
-              <pre className="whitespace-pre-wrap text-sm font-mono leading-relaxed">{m.content}</pre>
-            </div>
-          </div>
-        ))}
+          {sendError && <div style={{ marginBlockStart: 12 }}><InlineNotice tone="danger">{sendError}</InlineNotice></div>}
+          <div className="assistant-composer"><form onSubmit={(event) => void send(event)}><div className="composer-box"><label htmlFor="assistant-input" className="sr-only">Ask the AV assistant</label><textarea id="assistant-input" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Ask about gear, routing, manuals, or troubleshooting…" disabled={sending} /><button className="composer-send" type="submit" aria-label="Send message" disabled={sending || !input.trim()}><Icon name="send" size={15} /></button></div><p className="composer-note">ENTER to send · SHIFT + ENTER for a new line</p></form></div>
+        </section>
+        <aside className="assistant-context" aria-label="Assistant context"><p className="context-label">Session context</p><div className="context-block"><div className="context-row"><span>Runtime</span><strong>{runtime === 'nanobot' ? 'Nanobot' : 'Built-in provider'}</strong></div><div className="context-row"><span>Service</span><strong>{connection === 'connected' ? 'Ready' : connection === 'offline' ? 'Unavailable' : 'Checking'}</strong></div><div className="context-row"><span>Knowledge</span><strong>Equipment + manuals</strong></div></div><div className="context-block"><p className="context-label">AudioBiblica tools</p>{['search_equipment', 'get_equipment_specifications', 'find_manuals', 'search_manufacturer_docs'].map((tool) => <div className="context-tool" key={tool}><Icon name="check" size={13} />{tool}</div>)}</div><div className="context-block"><p className="context-label">Service status</p><p style={{ fontSize: '0.7rem', color: 'var(--muted)' }}>{connectionMessage}</p></div></aside>
       </div>
-
-      <div className="p-4 border-t border-slate-800 bg-slate-950/50">
-        <form onSubmit={e => { e.preventDefault(); send(); }} className="flex gap-3">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
-            placeholder="Ask about audio gear… (Shift+Enter for newline)"
-            className="flex-1 bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent"
-            disabled={loading}
-          />
-          <button
-            onClick={send}
-            disabled={loading || !input.trim()}
-            className="px-6 py-3 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-semibold rounded-xl transition-colors"
-          >
-            {loading ? '…' : 'Send'}
-          </button>
-        </form>
-      </div>
-    </div>
+    </>
   );
 };
 

@@ -30,6 +30,8 @@ class Equipment:
     description: Optional[str] = None
     specifications: dict = field(default_factory=dict)
     manuals: list = field(default_factory=list)
+    research_findings: list = field(default_factory=list)
+    archived: bool = False
     created_at: str = ""
     updated_at: str = ""
 

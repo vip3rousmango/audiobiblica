@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in AudioBiblica did not work the way you expected
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        If the app is telling you something is *missing* — a model, a web-search key, Docker — that is
+        probably a setup step rather than a bug. Check
+        [docs/TROUBLESHOOTING.md](https://github.com/audiobiblica/audiobiblica/blob/develop/docs/TROUBLESHOOTING.md)
+        first; most of those have a one-line fix.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What were you doing, and what did you see?
+      placeholder: I clicked ... and the page showed ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the problem. Leave this blank if it only happened once and you cannot repeat it.
+      placeholder: |
+        1. Open http://localhost:8000
+        2. ...
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install AudioBiblica?
+      options:
+        - Docker bundle (docker compose up, or scripts/audiobiblica)
+        - From source (Python venv and npm)
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Open http://localhost:8000/health in a browser and paste the "version" value.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: browser
+    attributes:
+      label: Browser (only if the problem is in the interface)
+      placeholder: Safari 18, Chrome 131, Firefox 133

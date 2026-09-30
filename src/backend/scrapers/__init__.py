@@ -1,5 +1,13 @@
 """Manufacturer scraping services."""
 
-from .firecrawl_scraper import FirecrawlScraper, ScrapeResult
+from src.backend.services.firecrawl_service import (
+    FirecrawlService,
+    get_firecrawl_service,
+    reset_firecrawl_service,
+)
 
-__all__ = ["FirecrawlScraper", "ScrapeResult"]
+__all__ = [
+    "FirecrawlService",
+    "get_firecrawl_service",
+    "reset_firecrawl_service",
+]

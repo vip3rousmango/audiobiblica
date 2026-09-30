@@ -1,55 +1,83 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { AssistantConfig, clearAssistantCredential, DataStatus, getApiBaseUrl, getAssistantConfig, getDataStatus, getMcpStatus, getSetupStatus, importCatalog, listAssistantModels, pullModel, saveAssistantConfig, testAssistantConnection } from '../lib/api';
+import { Icon } from '../components/Icon';
+import { Button, InlineNotice, PageHeader, StatusDot } from '../components/ui';
 
-type Provider = 'OpenAI' | 'Anthropic' | 'Local';
+type Provider = AssistantConfig['provider'];
+type Runtime = AssistantConfig['runtime'];
+
 interface SettingsData {
+  runtime: Runtime;
   provider: Provider;
   apiKey: string;
   model: string;
-  mcpUrl: string;
-  theme: 'dark' | 'light' | 'system';
-  language: string;
+  localBaseUrl: string;
+  nanobotUrl: string;
+  nanobotApiKey: string;
+  firecrawlApiKey: string;
 }
 
 const STORAGE_KEY = 'audiobiblica-settings';
 
 const DEFAULTS: SettingsData = {
-  provider: 'OpenAI',
+  runtime: 'builtin',
+  provider: 'Local',
   apiKey: '',
-  model: 'gpt-4o',
-  mcpUrl: 'http://localhost:8765',
-  theme: 'dark',
-  language: 'en',
+  model: 'llama3.2:3b',
+  localBaseUrl: 'http://localhost:11434',
+  nanobotUrl: 'http://localhost:8900',
+  nanobotApiKey: '',
+  firecrawlApiKey: '',
 };
 
 const PROVIDER_MODELS: Record<Provider, string[]> = {
   OpenAI: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o3-mini'],
-  Anthropic: ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'],
-  Local: ['llama3.1', 'mistral', 'qwen2.5', 'phi4'],
+  Anthropic: ['claude-sonnet-4-20250514', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
+  Local: ['llama3.2:3b', 'llama3.2:latest', 'mistral', 'qwen2.5', 'phi4'],
 };
 
 function getSaved(): SettingsData {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<SettingsData>;
-      return { ...DEFAULTS, ...parsed };
+      const parsed = JSON.parse(raw) as Partial<SettingsData> & { mcpUrl?: string; theme?: string };
+      const { mcpUrl: _obsoleteMcpUrl, theme: _obsoleteTheme, ...settings } = parsed;
+      return { ...DEFAULTS, ...settings };
     }
   } catch {}
   return { ...DEFAULTS };
 }
 
+/* A Firecrawl key can only be probed once it is active, so put the previously
+   stored key back (or clear the rejected one) whenever a test fails. */
+async function restoreFirecrawlKey(previousKey: string): Promise<boolean> {
+  const url = `${getApiBaseUrl()}/api/v1/config/firecrawl`;
+  try {
+    if (previousKey) {
+      const restored = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: previousKey }),
+      });
+      if (restored.ok) return true;
+    }
+    await fetch(url, { method: 'DELETE' });
+  } catch {}
+  return false;
+}
+
 /* Lightweight toast */
-const Toast: React.FC<{ message: string; onClose: () => void; type?: 'success' | 'error' | 'info' }> = ({ message, onClose, type = 'success' }) => {
-  const bg = type === 'success' ? 'bg-emerald-500/90' : type === 'error' ? 'bg-rose-500/90' : 'bg-amber-500/90';
+const Toast: React.FC<{ message: string; onClose: () => void; type?: 'success' | 'error' }> = ({ message, onClose, type = 'success' }) => {
   useEffect(() => {
-    const t = setTimeout(onClose, 3000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(onClose, 3000);
+    return () => clearTimeout(timer);
   }, [onClose]);
+  const isError = type === 'error';
   return (
-    <div className={`fixed top-6 right-6 z-[60] ${bg} text-white px-5 py-3 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 text-sm font-medium animate-in slide-in-from-top-2 fade-in duration-300`}>
-      <span>{type === 'success' ? '✓' : type === 'error' ? '✗' : 'ℹ'}</span>
+    <div className={`toast ${isError ? 'toast--danger' : 'toast--success'}`} role={isError ? 'alert' : 'status'}>
+      <span aria-hidden="true">{isError ? '✗' : '✓'}</span>
       <span>{message}</span>
-      <button onClick={onClose} aria-label="close" className="ml-2 hover:text-white/80">×</button>
+      <button type="button" className="toast__dismiss" onClick={onClose} aria-label="Dismiss notification">×</button>
     </div>
   );
 };
@@ -57,53 +85,190 @@ const Toast: React.FC<{ message: string; onClose: () => void; type?: 'success' |
 const Settings: React.FC = () => {
   const [data, setData] = useState<SettingsData>(getSaved);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [mcpStatus, setMcpStatus] = useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
   const [mcpMsg, setMcpMsg] = useState('');
-  const [fileName, setFileName] = useState('');
-  const [processing, setProcessing] = useState(false);
-  const [processingProgress, setProcessingProgress] = useState(0);
+  const [assistantStatus, setAssistantStatus] = useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
+  const [assistantMsg, setAssistantMsg] = useState('');
+  const [assistantKeyConfigured, setAssistantKeyConfigured] = useState(false);
+  const [nanobotKeyConfigured, setNanobotKeyConfigured] = useState(false);
+  const [firecrawlConfigured, setFirecrawlConfigured] = useState(false);
+  const [firecrawlStatus, setFirecrawlStatus] = useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
+  const [firecrawlMsg, setFirecrawlMsg] = useState('');
   const [showKey, setShowKey] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [showNanobotKey, setShowNanobotKey] = useState(false);
+  const [showFirecrawlKey, setShowFirecrawlKey] = useState(false);
+  const savedFirecrawlKey = useRef('');
+  const [liveModels, setLiveModels] = useState<string[]>([]);
+  const [modelsError, setModelsError] = useState('');
 
-  // Hydrate theme on load
-  useEffect(() => {
-    const saved = getSaved();
-    setData(saved);
+  const [dataStatus, setDataStatus] = useState<DataStatus | null>(null);
+  const [dataBusy, setDataBusy] = useState(false);
+  const [dataMsg, setDataMsg] = useState('');
+
+  const refreshDataStatus = useCallback(async () => {
+    try {
+      setDataStatus(await getDataStatus());
+    } catch {
+      setDataStatus(null);
+    }
   }, []);
 
-  // Apply theme when changed
+  const [modelStatus, setModelStatus] = useState<{ available: boolean; reachable: boolean; pulling: boolean }>({ available: false, reachable: false, pulling: false });
+
+  const refreshModelStatus = useCallback(async () => {
+    try {
+      const status = await getSetupStatus();
+      setModelStatus({
+        available: status.assistant.model_available,
+        reachable: status.assistant.reachable,
+        pulling: status.assistant.pulling === 'pulling',
+      });
+    } catch {
+      setModelStatus({ available: false, reachable: false, pulling: false });
+    }
+  }, []);
+
   useEffect(() => {
-    if (data.theme === 'dark') document.documentElement.classList.remove('light', 'system-light');
-    else if (data.theme === 'light') { document.documentElement.classList.add('light'); document.documentElement.classList.remove('system-light'); }
-    else { document.documentElement.classList.add('system-light'); document.documentElement.classList.remove('light'); }
-  }, [data.theme]);
+    if (!modelStatus.pulling) return;
+    const timer = window.setInterval(() => { void refreshModelStatus(); }, 5000);
+    return () => window.clearInterval(timer);
+  }, [modelStatus.pulling, refreshModelStatus]);
+
+  useEffect(() => {
+    setData(getSaved());
+    void getAssistantConfig().then((settings) => {
+      setAssistantKeyConfigured(settings.api_key_configured);
+      setNanobotKeyConfigured(settings.nanobot_api_key_configured);
+      setData((current) => ({
+        ...current,
+        runtime: settings.runtime,
+        provider: settings.provider,
+        model: settings.model,
+        localBaseUrl: settings.local_base_url,
+        nanobotUrl: settings.nanobot_url,
+      }));
+    }).catch(() => undefined);
+    void fetch(`${getApiBaseUrl()}/api/v1/config/firecrawl`).then(async (response) => {
+      if (!response.ok) return;
+      const settings = await response.json();
+      setFirecrawlConfigured(Boolean(settings.api_key_configured));
+    }).catch(() => undefined);
+    void refreshModelStatus();
+    void refreshDataStatus();
+  }, [refreshModelStatus, refreshDataStatus]);
+
+  useEffect(() => {
+    let active = true;
+    setModelsError('');
+    void listAssistantModels()
+      .then((result) => { if (active) setLiveModels(result.models); })
+      .catch((caught) => {
+        if (!active) return;
+        setLiveModels([]);
+        setModelsError(caught instanceof Error ? caught.message : 'Could not list models from the assistant service.');
+      });
+    return () => { active = false; };
+  }, [data.runtime, data.provider, data.localBaseUrl]);
 
   const updateField = (key: keyof SettingsData, value: any) => {
     setData((prev) => ({ ...prev, [key]: value }));
     if (errors[key]) setErrors((prev) => { const n = { ...prev }; delete n[key]; return n; });
   };
 
-  const showToast = useCallback((msg: string, type: 'success' | 'error' | 'info' = 'success') => {
+  const showToast = useCallback((msg: string, type: 'success' | 'error' = 'success') => {
     setToast({ msg, type });
   }, []);
 
-  const save = () => {
+  const downloadModel = async () => {
+    const model = data.model || 'llama3.2:3b';
+    try {
+      await pullModel(model);
+      await refreshModelStatus();
+      showToast(`Downloading ${model}. This can take a few minutes.`);
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : 'The download could not start.', 'error');
+    }
+  };
+
+  const exportCatalog = async () => {
+    setDataBusy(true);
+    setDataMsg('');
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/data/export`);
+      if (!response.ok) throw new Error(`The export failed (HTTP ${response.status}).`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `audiobiblica-export-${new Date().toISOString().slice(0, 10)}.zip`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('Your catalog was exported.');
+    } catch (caught) {
+      setDataMsg(caught instanceof Error ? caught.message : 'The export failed.');
+    } finally {
+      setDataBusy(false);
+    }
+  };
+
+  const importCatalogFile = async (file: File) => {
+    setDataBusy(true);
+    setDataMsg('');
+    try {
+      const counts = await importCatalog(file);
+      await refreshDataStatus();
+      setDataMsg(`Imported ${counts.equipment_added} new device(s), updated ${counts.equipment_updated}, added ${counts.manuals_added} manual(s) and ${counts.findings_added} research finding(s); ${counts.skipped} already present.`);
+    } catch (caught) {
+      setDataMsg(caught instanceof Error ? caught.message : 'That file could not be imported.');
+    } finally {
+      setDataBusy(false);
+    }
+  };
+
+  const save = async () => {
     const e: Record<string, string> = {};
-    if (!data.provider) e.provider = 'Select a provider';
-    if (!data.apiKey && data.provider !== 'Local') e.apiKey = 'API key required';
-    if (!data.model) e.model = 'Select a model';
-    if (!data.mcpUrl || !/^https?:\/\/.+/.test(data.mcpUrl)) e.mcpUrl = 'Valid server URL required';
+    if (data.provider !== 'Local' && data.apiKey && data.apiKey.length < 10) e.apiKey = 'API key appears invalid';
+    if (data.nanobotApiKey && data.nanobotApiKey.length < 10) e.nanobotApiKey = 'API key appears invalid';
+    if (data.runtime === 'builtin' && !data.model.trim()) e.model = 'Choose a model';
+    if (data.runtime === 'nanobot' && !/^https?:\/\/.+/.test(data.nanobotUrl)) e.nanobotUrl = 'Valid Nanobot URL required';
+    if (data.runtime === 'builtin' && data.provider === 'Local' && !/^https?:\/\/.+/.test(data.localBaseUrl)) e.localBaseUrl = 'Valid Ollama URL required';
     setErrors(e);
     if (Object.keys(e).length > 0) {
       showToast('Please fix validation errors.', 'error');
       return;
     }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+      const tasks: Promise<unknown>[] = [
+        saveAssistantConfig({
+          runtime: data.runtime,
+          provider: data.provider,
+          model: data.runtime === 'nanobot' ? data.model.trim() || 'nanobot' : data.model.trim(),
+          local_base_url: data.localBaseUrl.trim(),
+          nanobot_url: data.nanobotUrl.trim(),
+          ...(data.apiKey.trim() ? { api_key: data.apiKey.trim() } : {}),
+          ...(data.nanobotApiKey.trim() ? { nanobot_api_key: data.nanobotApiKey.trim() } : {}),
+        }),
+      ];
+      if (data.firecrawlApiKey.trim()) tasks.push(fetch(`${getApiBaseUrl()}/api/v1/config/firecrawl`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: data.firecrawlApiKey.trim() }),
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(`Could not save Firecrawl configuration (HTTP ${response.status}).`);
+      }));
+      const [assistantConfig] = await Promise.all(tasks) as [AssistantConfig];
+      setAssistantKeyConfigured(assistantConfig.api_key_configured);
+      setNanobotKeyConfigured(assistantConfig.nanobot_api_key_configured);
+      if (data.firecrawlApiKey.trim()) {
+        savedFirecrawlKey.current = data.firecrawlApiKey.trim();
+        setFirecrawlConfigured(true);
+      }
+      const { apiKey: _apiKey, nanobotApiKey: _nanobotApiKey, firecrawlApiKey: _firecrawlApiKey, ...safeSettings } = data;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(safeSettings));
+      setData((current) => ({ ...current, apiKey: '', nanobotApiKey: '', firecrawlApiKey: '' }));
       showToast('Settings saved successfully.', 'success');
-    } catch {
-      showToast('Failed to save settings.', 'error');
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : 'Failed to save settings.', 'error');
     }
   };
 
@@ -111,262 +276,203 @@ const Settings: React.FC = () => {
     setMcpStatus('checking');
     setMcpMsg('');
     try {
-      // Use relative /mcp endpoint against current origin (backend at :8000 if proxied, else try direct)
-      const url = new URL(data.mcpUrl);
-      // Try with a short timeout; in real setup this hits localhost:8765 or gateway
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      const res = await fetch(`${data.mcpUrl}/status`, { signal: controller.signal });
-      clearTimeout(timeout);
-      if (res.ok) {
-        setMcpStatus('connected');
-        setMcpMsg('MCP server is responsive.');
-        showToast('MCP connection verified.', 'success');
-      } else {
-        setMcpStatus('error');
-        setMcpMsg('MCP server returned non-OK status.');
-      }
-    } catch {
+      const result = await getMcpStatus();
+      if (result.mcp?.status !== 'ready') throw new Error('AudioBiblica MCP server is not ready.');
+      setMcpStatus('connected');
+      setMcpMsg('Streamable HTTP MCP endpoint is ready.');
+    } catch (caught) {
       setMcpStatus('error');
-      setMcpMsg('Could not connect to MCP server (timeout or unreachable).');
+      setMcpMsg(caught instanceof Error ? caught.message : 'Could not reach the AudioBiblica MCP server.');
     }
   };
 
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) {
-      showToast('Only PDF files are accepted.', 'error');
-      setFileName('');
+  const testAssistant = async () => {
+    setAssistantStatus('checking');
+    setAssistantMsg('');
+    try {
+      const result = await testAssistantConnection();
+      setAssistantStatus('connected');
+      setAssistantMsg(result.message);
+    } catch (caught) {
+      setAssistantStatus('error');
+      setAssistantMsg(caught instanceof Error ? caught.message : 'Could not reach the selected assistant.');
+    }
+  };
+
+  const clearCredential = async (runtime: Runtime) => {
+    try {
+      await clearAssistantCredential(runtime);
+      if (runtime === 'builtin') {
+        setAssistantKeyConfigured(false);
+        updateField('apiKey', '');
+      } else {
+        setNanobotKeyConfigured(false);
+        updateField('nanobotApiKey', '');
+      }
+      showToast('Saved API key removed.', 'success');
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : 'Could not remove the saved API key.', 'error');
+    }
+  };
+
+  const clearFirecrawl = async () => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/config/firecrawl`, { method: 'DELETE' });
+      if (!response.ok) throw new Error(`Could not remove Firecrawl configuration (HTTP ${response.status}).`);
+      setFirecrawlConfigured(false);
+      updateField('firecrawlApiKey', '');
+      showToast('Saved Firecrawl key removed.', 'success');
+    } catch (caught) {
+      showToast(caught instanceof Error ? caught.message : 'Could not remove the Firecrawl API key.', 'error');
+    }
+  };
+
+  const fetchFirecrawl = async () => {
+    setFirecrawlStatus('checking');
+    setFirecrawlMsg('');
+    const candidateKey = data.firecrawlApiKey.trim();
+    if (!candidateKey && !firecrawlConfigured) {
+      setFirecrawlStatus('error');
+      setFirecrawlMsg('Firecrawl API key not configured.');
       return;
     }
-    setFileName(file.name);
-    setProcessing(true);
-    setProcessingProgress(0);
-    // Simulate processing
-    const int = setInterval(() => {
-      setProcessingProgress((p) => {
-        if (p >= 100) {
-          clearInterval(int);
-          setProcessing(false);
-          setProcessingProgress(100);
-          showToast('Equipment import complete.', 'success');
-          return 100;
-        }
-        return p + 10;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let candidatePersisted = false;
+    try {
+      if (candidateKey) {
+        const configResponse = await fetch(`${getApiBaseUrl()}/api/v1/config/firecrawl`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ api_key: candidateKey }),
+          signal: controller.signal,
+        });
+        if (!configResponse.ok) throw new Error(`Could not save Firecrawl configuration (HTTP ${configResponse.status}).`);
+        candidatePersisted = true;
+      }
+      const response = await fetch(`${getApiBaseUrl()}/api/v1/research/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: 'test', limit: 1 }),
+        signal: controller.signal,
       });
-    }, 300);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) throw new Error(result.detail || result.error || 'Firecrawl API returned an error.');
+      if (candidatePersisted) setFirecrawlConfigured(true);
+      setFirecrawlStatus('connected');
+      setFirecrawlMsg('Firecrawl returned a successful one-result search.');
+    } catch (caught) {
+      if (candidatePersisted) setFirecrawlConfigured(await restoreFirecrawlKey(savedFirecrawlKey.current));
+      setFirecrawlStatus('error');
+      setFirecrawlMsg(caught instanceof Error ? caught.message : 'Could not connect to Firecrawl API.');
+    } finally {
+      clearTimeout(timeout);
+    }
   };
 
-  const statusColor = mcpStatus === 'connected' ? 'text-emerald-400' : mcpStatus === 'checking' ? 'text-amber-400' : mcpStatus === 'error' ? 'text-rose-400' : 'text-slate-400';
+  const statusColor = mcpStatus === 'connected' ? 'success' : mcpStatus === 'checking' ? 'warning' : mcpStatus === 'error' ? 'danger' : 'neutral';
   const statusLabel = mcpStatus === 'connected' ? 'Connected' : mcpStatus === 'checking' ? 'Checking…' : mcpStatus === 'error' ? 'Disconnected' : 'Unknown';
+  const providerModels = liveModels.length > 0 ? liveModels : PROVIDER_MODELS[data.provider];
+  const modelOptions = !data.model || providerModels.includes(data.model) ? providerModels : [data.model, ...providerModels];
+  const sections = [
+    { id: 'assistant', label: 'Assistant', icon: 'sparkles' as const },
+    { id: 'web-search', label: 'Web search (optional)', icon: 'globe' as const },
+    { id: 'advanced', label: 'Advanced', icon: 'server' as const },
+    { id: 'your-data', label: 'Your data', icon: 'database' as const },
+  ] as const;
+
+  const [activeSection, setActiveSection] = useState<'assistant' | 'web-search' | 'advanced' | 'your-data'>(sections[0].id);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 pb-24">
-      <div className="max-w-3xl mx-auto px-6 py-10">
-        <div className="mb-10">
-          <h2 className="text-3xl font-extrabold tracking-tight text-amber-400 mb-2">Settings</h2>
-          <p className="text-slate-400">Configure AI providers, MCP server, equipment imports, and preferences.</p>
-        </div>
-
-        {/* AI Provider */}
-        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-7 mb-6 shadow-xl backdrop-blur-md">
-          <div className="flex items-center gap-2 mb-6">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <h3 className="text-lg font-bold text-amber-300">AI Provider</h3>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-5">
-            <div>
-              <label htmlFor="provider" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Provider</label>
-              <select
-                id="provider"
-                value={data.provider}
-                onChange={(e) => { updateField('provider', e.target.value as Provider); setData((prev) => ({ ...prev, model: PROVIDER_MODELS[e.target.value as Provider][0] })); }}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/60 transition shadow-inner"
-              >
-                {Object.keys(PROVIDER_MODELS).map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-              {errors.provider && <p className="text-rose-400 text-xs mt-1.5">{errors.provider}</p>}
-            </div>
-
-            <div>
-              <label htmlFor="model" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Model</label>
-              <select
-                id="model"
-                value={data.model}
-                onChange={(e) => updateField('model', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/60 transition shadow-inner"
-              >
-                {PROVIDER_MODELS[data.provider].map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              {errors.model && <p className="text-rose-400 text-xs mt-1.5">{errors.model}</p>}
-            </div>
-          </div>
-
-          <div className="mt-5 relative">
-            <label htmlFor="apiKey" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">API Key <span className="normal-case text-slate-500 font-normal">(masked)</span></label>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <input
-                  id="apiKey"
-                  type={showKey ? 'text' : 'password'}
-                  value={data.apiKey}
-                  onChange={(e) => updateField('apiKey', e.target.value)}
-                  placeholder={data.provider === 'Local' ? 'Not required for local' : 'sk-…'}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/60 transition shadow-inner font-mono"
-                  autoComplete="off"
-                />
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowKey((s) => !s)}
-                className="px-3 py-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-xs font-medium text-slate-300 transition"
-                aria-label="Toggle visibility"
-              >
-                {showKey ? 'Hide' : 'Show'}
-              </button>
-            </div>
-            {errors.apiKey && <p className="text-rose-400 text-xs mt-1.5">{errors.apiKey}</p>}
-          </div>
-
-          <div className="mt-6 flex items-center gap-3">
-            <button
-              onClick={save}
-              className="px-6 py-2.5 rounded-xl bg-amber-400 text-slate-950 font-bold text-sm hover:bg-amber-300 transition shadow-lg shadow-amber-400/20 active:scale-[0.98]"
-            >
-              Save Provider Settings
-            </button>
-            <span className="text-xs text-slate-500">Saved to localStorage</span>
-          </div>
-        </section>
-
-        {/* MCP */}
-        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-7 mb-6 shadow-xl backdrop-blur-md">
-          <div className="flex items-center gap-2 mb-6">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <h3 className="text-lg font-bold text-amber-300">MCP Server</h3>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-5 items-end">
-            <div className="md:col-span-2">
-              <label htmlFor="mcpUrl" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Server URL</label>
-              <input
-                id="mcpUrl"
-                type="url"
-                value={data.mcpUrl}
-                onChange={(e) => updateField('mcpUrl', e.target.value)}
-                className={`w-full bg-slate-950 border rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 transition shadow-inner font-mono ${errors.mcpUrl ? 'border-rose-500/70 focus:ring-rose-400/60' : 'border-slate-700 focus:ring-amber-400/60'}`}
-                placeholder="http://localhost:8765"
-              />
-              {errors.mcpUrl && <p className="text-rose-400 text-xs mt-1.5">{errors.mcpUrl}</p>}
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={fetchMcp}
-                className="flex-1 px-4 py-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-sm font-semibold text-slate-200 transition"
-              >
-                Check
-              </button>
-              <div className="text-right min-w-[140px]">
-                <div className={`text-xs font-semibold ${statusColor}`}>{statusLabel}</div>
-                <div className="text-[11px] text-slate-400">{mcpMsg || '—'}</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Equipment Import */}
-        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-7 mb-6 shadow-xl backdrop-blur-md">
-          <div className="flex items-center gap-2 mb-6">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <h3 className="text-lg font-bold text-amber-300">Equipment Import</h3>
-          </div>
-
-          <div className="border-2 border-dashed border-slate-700 rounded-2xl p-8 text-center hover:border-amber-400/60 transition bg-slate-950/40">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,application/pdf"
-              onChange={handleFile}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 text-sm font-semibold text-slate-200 transition shadow-md"
-            >
-              <span>📄</span> Upload PDF
-            </button>
-            <p className="text-xs text-slate-500 mt-3">PDF manuals and spec sheets. Max 20MB.</p>
-          </div>
-
-          {fileName && (
-            <div className="mt-4 rounded-xl bg-slate-950 border border-slate-800 p-4">
-              <div className="flex items-center justify-between mb-2">
-                <div className="text-sm font-medium text-slate-200 truncate max-w-[80%]">{fileName}</div>
-                <div className={`text-xs font-bold ${processing ? 'text-amber-400' : 'text-emerald-400'}`}>{processing ? 'Processing' : 'Done'}</div>
-              </div>
-              <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-amber-400 to-amber-300 rounded-full transition-all duration-300"
-                  style={{ width: `${processingProgress}%` }}
-                />
-              </div>
-              <div className="text-xs text-slate-400 mt-1">{processingProgress}% — extracting specs</div>
-            </div>
-          )}
-        </section>
-
-        {/* Preferences */}
-        <section className="bg-slate-900/60 border border-slate-800 rounded-2xl p-7 shadow-xl backdrop-blur-md">
-          <div className="flex items-center gap-2 mb-6">
-            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-            <h3 className="text-lg font-bold text-amber-300">Preferences</h3>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            <div>
-              <label htmlFor="theme" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Theme</label>
-              <select
-                id="theme"
-                value={data.theme}
-                onChange={(e) => updateField('theme', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/60 transition shadow-inner"
-              >
-                <option value="dark">Dark</option>
-                <option value="light">Light</option>
-                <option value="system">System</option>
-              </select>
-            </div>
-            <div>
-              <label htmlFor="language" className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Language</label>
-              <select
-                id="language"
-                value={data.language}
-                onChange={(e) => updateField('language', e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/60 transition shadow-inner"
-              >
-                <option value="en">English</option>
-                <option value="es">Español</option>
-                <option value="fr">Français</option>
-                <option value="de">Deutsch</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="mt-7 flex items-center gap-3">
-            <button
-              onClick={save}
-              className="px-6 py-2.5 rounded-xl bg-amber-400 text-slate-950 font-bold text-sm hover:bg-amber-300 transition shadow-lg shadow-amber-400/20 active:scale-[0.98]"
-            >
-              Save Preferences
-            </button>
-          </div>
-        </section>
-      </div>
-
+    <>
+      <PageHeader eyebrow="Configuration" title="Settings" description="Choose how the assistant answers, add an optional web search key, and reach the service addresses." actions={<Button variant="primary" icon="check" onClick={save}>Save all</Button>} />
       {toast && <Toast message={toast.msg} onClose={() => setToast(null)} type={toast.type} />}
-    </div>
+      <div className="settings-grid">
+        <nav className="settings-nav" aria-label="Settings sections">{sections.map((section) => <button key={section.id} className={activeSection === section.id ? 'active' : ''} onClick={() => setActiveSection(section.id)}><Icon name={section.icon} size={15} />{section.label}</button>)}</nav>
+        <div className="settings-content">
+          {activeSection === 'assistant' && <section className="settings-section" aria-labelledby="ai-heading">
+            <div className="settings-section-header"><div><h2 id="ai-heading">Assistant runtime</h2><p>Choose the built-in provider adapter or the OpenAI-compatible Nanobot agent gateway.</p></div></div>
+            <div className="form-grid">
+              <div className="form-field"><label htmlFor="assistant-runtime">Runtime</label><select id="assistant-runtime" value={data.runtime} onChange={(event) => updateField('runtime', event.target.value as Runtime)}><option value="builtin">Built-in provider</option><option value="nanobot">Nanobot gateway</option></select></div>
+              {data.runtime === 'builtin' && <div className="form-field"><label htmlFor="provider">Provider</label><select id="provider" value={data.provider} onChange={(event) => updateField('provider', event.target.value as Provider)}><option value="OpenAI">OpenAI</option><option value="Anthropic">Anthropic</option><option value="Local">Local (Ollama)</option></select></div>}
+              <div className="form-field"><label htmlFor="model">Model</label>{data.runtime === 'builtin' ? <select id="model" value={data.model} onChange={(event) => updateField('model', event.target.value)}>{modelOptions.map((model) => <option key={model} value={model}>{liveModels.length > 0 && !liveModels.includes(model) ? `${model} (not available)` : model}</option>)}</select> : <input id="model" value={data.model} onChange={(event) => updateField('model', event.target.value)} placeholder="Nanobot selects its configured model" />}{data.runtime === 'builtin' && modelsError && <span className="field-help" style={{ color: 'var(--amber)' }}>{modelsError} Showing suggested {data.provider} models instead.</span>}</div>
+              {data.runtime === 'builtin' && data.provider === 'Local' && (
+                <div className="form-field form-field-wide">
+                  <span>Model on this computer</span>
+                  {modelStatus.available ? (
+                    <StatusDot tone="success" label="Installed and ready" />
+                  ) : modelStatus.pulling ? (
+                    <span className="field-help">Downloading… this can take a few minutes.</span>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="secondary" icon="upload" onClick={() => void downloadModel()}>Download {data.model || 'llama3.2:3b'} (about 2 GB)</Button>
+                      {!modelStatus.reachable && <span className="field-help">Ollama is not running. Install or start it from ollama.com/download.</span>}
+                    </>
+                  )}
+                </div>
+              )}
+              {data.runtime === 'builtin' && data.provider !== 'Local' && <div className="form-field form-field-wide secret-field"><label htmlFor="assistant-api-key">{data.provider} API key</label><input id="assistant-api-key" autoComplete="new-password" type={showKey ? 'text' : 'password'} value={data.apiKey} onChange={(event) => updateField('apiKey', event.target.value)} placeholder={assistantKeyConfigured ? 'Saved securely; enter a replacement or leave blank' : 'Enter API key'} /><button type="button" className="secret-toggle" onClick={() => setShowKey((visible) => !visible)}>{showKey ? 'Hide' : 'Show'}</button>{assistantKeyConfigured && <span className="field-help">A key is stored in the backend config on this machine.</span>}{errors.apiKey && <span className="field-help" style={{ color: 'var(--red)' }}>{errors.apiKey}</span>}</div>}
+            </div>
+            <div className="form-actions"><Button variant="secondary" icon="plug" onClick={() => void testAssistant()} disabled={assistantStatus === 'checking'}>{assistantStatus === 'checking' ? 'Testing…' : 'Test saved assistant'}</Button><StatusDot tone={assistantStatus === 'connected' ? 'success' : assistantStatus === 'error' ? 'danger' : assistantStatus === 'checking' ? 'warning' : 'neutral'} label={assistantStatus === 'connected' ? 'Connected' : assistantStatus === 'error' ? 'Unavailable' : assistantStatus === 'checking' ? 'Testing' : 'Not tested'} />{data.runtime === 'builtin' && assistantKeyConfigured && <Button variant="ghost" size="sm" onClick={() => void clearCredential('builtin')}>Remove saved provider key</Button>}{data.runtime === 'nanobot' && nanobotKeyConfigured && <Button variant="ghost" size="sm" onClick={() => void clearCredential('nanobot')}>Remove saved Nanobot key</Button>}</div>
+            {assistantMsg && <InlineNotice tone={assistantStatus === 'connected' ? 'success' : 'danger'} icon={assistantStatus === 'connected' ? 'check' : 'x'}>{assistantMsg}</InlineNotice>}
+            <p className="field-help">Save changes before testing. Provider credentials are kept in the backend config file, never browser storage. Local models require Ollama to be running.</p>
+          </section>}
+          {activeSection === 'web-search' && <section className="settings-section" id="web-search" aria-labelledby="web-search-heading">
+            <div className="settings-section-header"><div><h2 id="web-search-heading">Web search (optional)</h2><p>Your own Firecrawl key adds live web search and structured extraction. Nothing else in AudioBiblica needs it.</p></div></div>
+            <div className="form-grid"><div className="form-field form-field-wide secret-field"><label htmlFor="firecrawlApiKey">Firecrawl API key</label><input id="firecrawlApiKey" autoComplete="new-password" type={showFirecrawlKey ? 'text' : 'password'} value={data.firecrawlApiKey} onChange={(event) => updateField('firecrawlApiKey', event.target.value)} placeholder={firecrawlConfigured ? 'Saved securely; enter a replacement or leave blank' : 'fc-…'} /><button className="secret-toggle" type="button" onClick={() => setShowFirecrawlKey(!showFirecrawlKey)}>{showFirecrawlKey ? 'Hide' : 'Show'}</button>{firecrawlConfigured && <span className="field-help">A key is stored in the backend config on this machine.</span>}</div></div>
+            <div className="form-actions"><Button variant="secondary" icon="plug" onClick={() => void fetchFirecrawl()} disabled={firecrawlStatus === 'checking'}>{firecrawlStatus === 'checking' ? 'Testing…' : 'Test Firecrawl'}</Button><StatusDot tone={firecrawlStatus === 'connected' ? 'success' : firecrawlStatus === 'error' ? 'danger' : firecrawlStatus === 'checking' ? 'warning' : 'neutral'} label={firecrawlConfigured ? firecrawlStatus === 'connected' ? 'Connected' : firecrawlStatus === 'error' ? 'Unavailable' : firecrawlStatus === 'checking' ? 'Testing' : 'Configured' : 'Not configured'} />{firecrawlConfigured && <Button variant="ghost" size="sm" onClick={() => void clearFirecrawl()}>Remove saved key</Button>}</div>
+            {firecrawlMsg && <InlineNotice tone={firecrawlStatus === 'connected' ? 'success' : 'danger'} icon={firecrawlStatus === 'connected' ? 'check' : 'x'}>{firecrawlMsg}</InlineNotice>}
+            <p className="field-help">Testing sends one live search request to Firecrawl.</p>
+          </section>}
+          {activeSection === 'advanced' && <section className="settings-section" aria-labelledby="advanced-heading">
+            <div className="settings-section-header"><div><h2 id="advanced-heading">Advanced</h2><p>Service addresses and the MCP endpoint. Change these only if you moved something.</p></div></div>
+            <div className="form-grid">
+              {data.runtime === 'builtin' && data.provider === 'Local' && <div className="form-field form-field-wide"><label htmlFor="local-base-url">Ollama URL</label><input id="local-base-url" type="url" value={data.localBaseUrl} onChange={(event) => updateField('localBaseUrl', event.target.value)} placeholder="http://localhost:11434" />{errors.localBaseUrl && <span className="field-help" style={{ color: 'var(--red)' }}>{errors.localBaseUrl}</span>}</div>}
+              {data.runtime === 'nanobot' && <>
+                <div className="form-field form-field-wide"><label htmlFor="nanobot-url">Nanobot API URL</label><input id="nanobot-url" type="url" value={data.nanobotUrl} onChange={(event) => updateField('nanobotUrl', event.target.value)} placeholder="http://localhost:8900" />{errors.nanobotUrl && <span className="field-help" style={{ color: 'var(--red)' }}>{errors.nanobotUrl}</span>}</div>
+                <div className="form-field form-field-wide secret-field"><label htmlFor="nanobot-api-key">Nanobot API key (only if configured)</label><input id="nanobot-api-key" autoComplete="new-password" type={showNanobotKey ? 'text' : 'password'} value={data.nanobotApiKey} onChange={(event) => updateField('nanobotApiKey', event.target.value)} placeholder={nanobotKeyConfigured ? 'Saved securely; enter a replacement or leave blank' : 'Optional for a loopback Nanobot service'} /><button type="button" className="secret-toggle" onClick={() => setShowNanobotKey((visible) => !visible)}>{showNanobotKey ? 'Hide' : 'Show'}</button>{errors.nanobotApiKey && <span className="field-help" style={{ color: 'var(--red)' }}>{errors.nanobotApiKey}</span>}</div>
+              </>}
+            </div>
+            <div className="form-field"><span>MCP endpoint</span><code>{getApiBaseUrl()}/mcp/</code></div>
+            <div className="form-actions"><Button variant="secondary" icon="server" onClick={() => void fetchMcp()} disabled={mcpStatus === 'checking'}>{mcpStatus === 'checking' ? 'Checking…' : 'Check backend'}</Button><StatusDot tone={statusColor} label={statusLabel} /></div>
+            {mcpMsg && <InlineNotice tone={mcpStatus === 'connected' ? 'success' : 'danger'} icon={mcpStatus === 'connected' ? 'check' : 'x'}>{mcpMsg}</InlineNotice>}
+          </section>}
+          {activeSection === 'your-data' && <section className="settings-section" aria-labelledby="data-heading">
+            <div className="settings-section-header"><div><h2 id="data-heading">Your data</h2><p>Everything stays on this computer.</p></div></div>
+            <div className="form-field form-field-wide">
+              <label htmlFor="data-dir">Catalog folder</label>
+              <code id="data-dir" style={{ overflowWrap: 'anywhere' }}>{dataStatus?.data_dir || 'Reading…'}</code>
+              <div className="form-actions">
+                <Button size="sm" variant="ghost" icon="copy" disabled={!dataStatus} onClick={() => { void navigator.clipboard.writeText(dataStatus?.data_dir || ''); showToast('Folder path copied.'); }}>Copy path</Button>
+                <Button size="sm" variant="ghost" icon="refresh" onClick={() => void refreshDataStatus()}>Refresh</Button>
+              </div>
+            </div>
+            <div className="form-actions" style={{ marginBlockStart: 14 }}>
+              <Button variant="primary" icon="download" disabled={dataBusy} onClick={() => void exportCatalog()}>Export my catalog</Button>
+              <label className="button button-secondary button-md" style={{ cursor: 'pointer' }}>
+                <Icon name="upload" size={17} />Import from a file
+                <input type="file" accept=".zip,application/zip" className="sr-only" disabled={dataBusy} onChange={(event) => { const file = event.target.files?.[0]; if (file) void importCatalogFile(file); event.target.value = ''; }} />
+              </label>
+            </div>
+            {dataMsg && <InlineNotice tone={dataMsg.startsWith('Imported') ? 'success' : 'danger'} icon={dataMsg.startsWith('Imported') ? 'check' : 'x'}>{dataMsg}</InlineNotice>}
+            <h3 style={{ fontSize: '.78rem', marginBlockStart: 20 }}>Automatic backups</h3>
+            {dataStatus && dataStatus.backups.length > 0 ? (
+              <ul className="backup-list">
+                {dataStatus.backups.slice(0, 5).map((backup) => (
+                  <li key={backup.name}>
+                    <span>{new Date(backup.created_at).toLocaleString()}</span>
+                    <code>{backup.name}</code>
+                    <span>{Math.round(backup.size_bytes / 1024)} KB</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="field-help">A copy is saved here every time AudioBiblica starts.</p>
+            )}
+          </section>}
+        </div>
+      </div>
+    </>
   );
 };
 

@@ -1,198 +1,166 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Equipment, getHealth, getSetupStatus, listEquipment, SetupStatus } from '../lib/api';
+import { Icon } from '../components/Icon';
+import { Button, EmptyState, PageHeader, StatusDot, Surface } from '../components/ui';
+import SetupChecklist from '../components/SetupChecklist';
 
-interface Equipment {
-  id: string;
-  name: string;
-  category: string;
-  manufacturer: string;
-  model?: string;
-  description?: string;
-  specifications?: Record<string, string>;
-  manuals?: Array<{
-    title: string;
-    url: string;
-    source: string;
-    downloaded_at: string;
-  }>;
+interface ServiceState {
+  label: string;
+  detail: string;
+  tone: 'success' | 'warning' | 'danger' | 'neutral';
+  icon: 'server' | 'database' | 'plug' | 'sparkles';
 }
 
-interface DashboardProps {
-  onRefresh?: () => void;
-}
-
-const Dashboard: React.FC<DashboardProps> = ({ onRefresh }) => {
+const Dashboard: React.FC = () => {
+  const navigate = useNavigate();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [stats, setStats] = useState({
-    totalEquipment: 0,
-    totalManuals: 0,
-    totalManufacturers: 0,
-    aiStatus: 'unknown',
-  });
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [setupStatus, setSetupStatus] = useState<SetupStatus | null>(null);
+  const [error, setError] = useState('');
 
-  const fetchEquipment = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/v1/equipment');
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-      const data = await response.json();
-      const equipmentList = data.equipment || [];
-      
-      const totalManuals = equipmentList.reduce(
-        (count, eq) => count + (eq.manuals ? eq.manuals.length : 0),
-        0
-      );
-      const uniqueManufacturers = new Set(
-        equipmentList.map((eq) => eq.manufacturer || '')
-      ).size;
-      
-      setEquipment(equipmentList);
-      setStats({
-        totalEquipment: equipmentList.length,
-        totalManuals: totalManuals,
-        totalManufacturers: uniqueManufacturers,
-        aiStatus: 'unknown',
-      });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch equipment data');
-    } finally {
-      setLoading(false);
+  const loadDashboard = useCallback(async () => {
+    setRefreshing(true);
+    setError('');
+    const [equipmentResult, healthResult, setupResult] = await Promise.allSettled([
+      listEquipment(),
+      getHealth(),
+      getSetupStatus(),
+    ]);
+
+    if (equipmentResult.status === 'fulfilled') {
+      setEquipment(equipmentResult.value);
+    } else {
+      setError('The catalog could not be reached. You can still explore the workspace and reconnect later.');
     }
-  };
-
-  useEffect(() => {
-    fetchEquipment();
+    setApiOnline(healthResult.status === 'fulfilled' && healthResult.value.status === 'ok');
+    setSetupStatus(setupResult.status === 'fulfilled' ? setupResult.value : null);
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
-  const handleRefresh = () => {
-    fetchEquipment();
-  };
+  useEffect(() => {
+    void loadDashboard();
+  }, [loadDashboard]);
 
-  if (loading && equipment.length === 0) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="max-w-4xl mx-auto px-6 py-12">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-slate-800 bg-slate-900/50 text-slate-400">
-              <svg className="w-5 h-5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-              <span>Loading equipment data...</span>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
-
-  if (error) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-slate-100">
-        <div className="max-w-4xl mx-auto px-6 py-12">
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-red-500 bg-red-500/20 text-red-400">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01" />
-              </svg>
-              <span>Error loading equipment data</span>
-            </div>
-          </div>
-        </div>
-      </main>
-    );
-  }
+  const manualCount = equipment.reduce((count, item) => count + (item.manuals?.length ?? 0), 0);
+  const manufacturerCount = new Set(equipment.map((item) => item.manufacturer).filter(Boolean)).size;
+  const assistant = setupStatus?.assistant ?? null;
+  const assistantDetail = assistant
+    ? assistant.model_available
+      ? 'Ready to answer'
+      : assistant.reachable
+        ? 'Needs a model'
+        : 'Not connected'
+    : 'Checking…';
+  const serviceStates: ServiceState[] = [
+    { label: 'AudioBiblica service', detail: apiOnline === true ? 'Running' : apiOnline === false ? 'Not running' : 'Checking…', tone: apiOnline === true ? 'success' : apiOnline === false ? 'danger' : 'neutral', icon: 'server' },
+    { label: 'Your catalog', detail: `${equipment.length} ${equipment.length === 1 ? 'item' : 'items'}`, tone: equipment.length > 0 ? 'success' : 'warning', icon: 'database' },
+    { label: 'Assistant', detail: assistantDetail, tone: assistant === null ? 'neutral' : assistant.model_available ? 'success' : assistant.reachable ? 'warning' : 'neutral', icon: 'sparkles' },
+  ];
 
   return (
-    <main className="min-h-screen bg-slate-950 text-slate-100">
-      <div className="max-w-4xl mx-auto px-6 py-12">
-        {/* Header */}
-        <header className="mb-8">
-          <h1 className="text-2xl font-bold tracking-tight text-amber-400">
-            Equipment Dashboard
-          </h1>
-          <p className="mt-2 text-slate-400">
-            Overview of audio equipment inventory and statistics
-          </p>
-        </header>
+    <>
+      <PageHeader
+        eyebrow="Workspace overview"
+        title="Your AV knowledge, in one place."
+        description="A calm control surface for cataloguing gear, enriching manuals, and giving your tools reliable technical context."
+        actions={<Button variant="primary" icon="plus" onClick={() => navigate('/library?new=1')}>Add equipment</Button>}
+      />
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <StatCard title="Total Equipment" value={stats.totalEquipment} icon="📦" />
-          <StatCard title="Total Manuals" value={stats.totalManuals} icon="📖" />
-          <StatCard title="Unique Manufacturers" value={stats.totalManufacturers} icon="🏭" />
-          <StatCard title="AI Status" value={stats.aiStatus} icon="🤖" />
+      <SetupChecklist />
+
+      {error && <div className="page-notice"><span>{error}</span><Button size="sm" variant="ghost" icon="refresh" onClick={() => void loadDashboard()}>Reconnect</Button></div>}
+
+      <section aria-label="Catalog metrics" className="metric-grid">
+        <article className="metric-card metric-acid">
+          <div className="metric-card-top"><span className="metric-label">Inventory</span><span className="metric-icon"><Icon name="package" size={15} /></span></div>
+          <p className="metric-value">{loading ? '—' : equipment.length}</p>
+          <span className="metric-footnote">catalogued devices</span>
+        </article>
+        <article className="metric-card metric-teal">
+          <div className="metric-card-top"><span className="metric-label">Documentation</span><span className="metric-icon"><Icon name="book" size={15} /></span></div>
+          <p className="metric-value">{loading ? '—' : manualCount}</p>
+          <span className="metric-footnote">linked manuals</span>
+        </article>
+        <article className="metric-card metric-blue">
+          <div className="metric-card-top"><span className="metric-label">Manufacturers</span><span className="metric-icon"><Icon name="globe" size={15} /></span></div>
+          <p className="metric-value">{loading ? '—' : manufacturerCount}</p>
+          <span className="metric-footnote">represented brands</span>
+        </article>
+        <article className="metric-card metric-amber">
+          <div className="metric-card-top"><span className="metric-label">Manuals indexed</span><span className="metric-icon"><Icon name="book" size={15} /></span></div>
+          <p className="metric-value">{loading ? '—' : manualCount}</p>
+          <span className="metric-footnote">PDFs and links you've added</span>
+        </article>
+      </section>
+
+      <div className="dashboard-grid">
+        <div className="dashboard-stack">
+          <Surface>
+            <div className="surface-header">
+              <div className="surface-title"><Icon name="activity" size={17} /><div><h2>Start with a clear next step</h2><p>Build the knowledge base your studio depends on.</p></div></div>
+            </div>
+            <div className="surface-body action-grid">
+              <button className="action-card" onClick={() => navigate('/library?new=1')}>
+                <span className="action-card-icon"><Icon name="plus" size={17} /></span>
+                <span><strong>Add a device</strong><br /><span>Create an equipment record with the details you already know.</span></span>
+              </button>
+              <button className="action-card" onClick={() => navigate('/research')}>
+                <span className="action-card-icon"><Icon name="research" size={17} /></span>
+                <span><strong>Research a model</strong><br /><span>Find a manual by pasting a link, importing a PDF, or searching the web.</span></span>
+              </button>
+              <button className="action-card" onClick={() => navigate('/nanobot')}>
+                <span className="action-card-icon"><Icon name="sparkles" size={17} /></span>
+                <span><strong>Ask the assistant</strong><br /><span>Compare devices, plan a signal chain, or diagnose a setup.</span></span>
+              </button>
+            </div>
+          </Surface>
+
+          <Surface>
+            <div className="surface-header">
+              <div className="surface-title"><Icon name="library" size={17} /><div><h2>Recent catalog activity</h2><p>Latest records in your equipment knowledge base.</p></div></div>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/library')}>View library <Icon name="arrow-up-right" size={13} /></Button>
+            </div>
+            <div className="surface-body">
+              {equipment.length === 0 ? (
+                <EmptyState icon="package" title="Your catalog is ready for its first record" description="Add the gear you rely on so every future search, research job, and assistant answer has a reliable source of truth." action={<Button size="sm" variant="secondary" icon="plus" onClick={() => navigate('/library?new=1')}>Add first device</Button>} />
+              ) : (
+                <div className="activity-list">
+                  {equipment.slice(0, 5).map((item) => (
+                    <div className="activity-row" key={item.id}>
+                      <span className="activity-icon"><Icon name="package" size={15} /></span>
+                      <span className="activity-copy"><strong>{item.name}</strong><span>{item.manufacturer}{item.model ? ` · ${item.model}` : ''}</span></span>
+                      <span className="activity-time">{item.category || 'equipment'}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Surface>
         </div>
 
-        {/* Featured Equipment Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {equipment.slice(0, 4).map((eq) => (
-            <EquipmentCard key={eq.id} equipment={eq} />
-          ))}
-        </div>
-      </div>
-    </main>
-  );
-};
-
-// Stat card component
-const StatCard: React.FC<{title: string, value: string, icon: string}> = ({
-  title,
-  value,
-  icon,
-}) => (
-  <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 hover:border-amber-500/50 transition-colors">
-    <div className="flex items-center justify-between mb-3">
-      <div className="text-2xl font-bold text-amber-400">{icon}</div>
-      <div className="text-slate-400 text-sm">{value}</div>
-    </div>
-    <p className="text-slate-500 text-sm mt-1">{title}</p>
-  </div>
-);
-
-// Equipment card component
-const EquipmentCard: React.FC<{equipment: Equipment}> = ({ equipment }) => {
-  return (
-    <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-5 hover:border-amber-500/50 transition-colors">
-      <div className="flex items-start gap-4">
-        <div className="flex-1">
-          <h3 className="font-semibold text-white">{equipment.name}</h3>
-          <p className="text-slate-400 text-sm mt-1">{equipment.category}</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <span className="text-amber-400 font-medium">{equipment.manufacturer}</span>
-          <span className="text-slate-500 text-xs">{equipment.model || '-'}</span>
-        </div>
-      </div>
-      <div className="mt-4 pt-4 border-t border-slate-800">
-        {equipment.description && (
-          <p className="text-slate-400 text-sm leading-relaxed">{equipment.description}</p>
-        )}
-        {equipment.specifications && (
-          <div className="mt-3 space-y-2 text-sm text-slate-400">
-            {Object.entries(equipment.specifications).map(([key, val]) => (
-              <div key={key} className="flex items-center gap-2 text-sm text-slate-400">
-                <span className="text-xs text-slate-500">{key}</span>
-                <span className="text-emerald-400">{val}</span>
-              </div>
-            ))}
+        <Surface>
+          <div className="surface-header">
+            <div className="surface-title"><Icon name="server" size={17} /><div><h2>System pulse</h2><p>Local services and data readiness.</p></div></div>
+            <Button variant="ghost" size="sm" icon="refresh" aria-label="Refresh system status" onClick={() => void loadDashboard()} disabled={refreshing} />
           </div>
-        )}
-        {equipment.manuals && (
-          <div className="mt-3 space-y-1">
-            {equipment.manuals.slice(0, 3).map((manual) => (
-              <div key={manual.id} className="flex items-center gap-2 text-sm text-slate-400">
-                <span className="text-amber-400">{manual.title}</span>
-                <span className="ml-auto text-xs text-slate-500">{manual.url}</span>
-              </div>
-            ))}
+          <div className="surface-body">
+            <div className="service-list">
+              {serviceStates.map((service) => (
+                <div className="service-row" key={service.label}>
+                  <div className="service-leading"><span className="activity-icon"><Icon name={service.icon} size={15} /></span><span className="service-copy"><strong>{service.label}</strong><span>{service.detail}</span></span></div>
+                  <StatusDot tone={service.tone} />
+                </div>
+              ))}
+            </div>
+            <div style={{ marginBlockStart: 21 }}><Button variant="secondary" size="sm" onClick={() => navigate('/mcp')}>Open advanced tools <Icon name="arrow-up-right" size={13} /></Button></div>
           </div>
-        )}
+        </Surface>
       </div>
-    </div>
+    </>
   );
 };
 

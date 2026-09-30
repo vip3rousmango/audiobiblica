@@ -1,17 +1,5 @@
-"""AudioBiblica backend package initialization."""
+"""AudioBiblica backend package.
 
-from .models.equipment import Equipment, EquipmentCategory, Manufacturer
-from .services.pdf_processing import pdf_processor, PDFProcessingResult
-from .scrapers.firecrawl_scraper import FirecrawlScraper, ScrapeResult
-from .mcp.server import AudioBiblicaMCPServer
-
-__all__ = [
-    "Equipment",
-    "EquipmentCategory",
-    "Manufacturer",
-    "PDFProcessingResult",
-    "pdf_processor",
-    "FirecrawlScraper",
-    "ScrapeResult",
-    "AudioBiblicaMCPServer",
-]
+Modules are imported by their full path (for example ``src.backend.main:app``) so
+that importing any part of the package never requires unrelated optional extras.
+"""

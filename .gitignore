@@ -177,6 +177,7 @@ coverage
 .idea/
 
 # Sensitive data / API keys
+.env
 .env.local
 .env.*.local
 
@@ -184,3 +185,19 @@ coverage
 build/
 bin/
 release/
+
+# macOS
+.DS_Store
+
+# Tooling caches
+.ruff_cache/
+CACHEDIR.TAG
+
+# Local catalog and databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Frontend build output
+src/frontend/dist/

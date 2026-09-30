@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Start AudioBiblica and open it in the browser.
+#
+# One command for a fresh machine: builds the app, starts it, waits until it
+# answers, then opens http://localhost:8000. Safe to run again at any time.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+DOCKER_HELP="AudioBiblica needs Docker Desktop once. Download it at https://www.docker.com/products/docker-desktop/ and run this command again."
+
+if ! command -v docker >/dev/null 2>&1; then
+  echo "$DOCKER_HELP"
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is installed but not running. Open Docker Desktop, wait until it says it is running, then run this command again."
+  exit 1
+fi
+
+echo "Starting AudioBiblica. The first run builds the app and can take a few minutes."
+docker compose up -d --build
+
+echo "Waiting for AudioBiblica to be ready..."
+for _ in $(seq 1 60); do
+  if curl -fsS http://localhost:8000/health >/dev/null 2>&1; then
+    echo "AudioBiblica is running. Opening http://localhost:8000"
+    if command -v open >/dev/null 2>&1; then
+      open http://localhost:8000
+    elif command -v xdg-open >/dev/null 2>&1; then
+      xdg-open http://localhost:8000
+    fi
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "AudioBiblica did not start within two minutes. The last log lines were:"
+docker compose logs --tail 40 audiobiblica
+exit 1

@@ -1,29 +1,28 @@
-# Dockerfile for AudioBiblica Backend
-FROM python:3.11-slim
+# Stage 1 -- build the user interface.
+FROM node:20-slim AS ui
+
+WORKDIR /ui
+
+COPY src/frontend/package.json src/frontend/package-lock.json ./
+RUN npm ci
+
+COPY src/frontend ./
+RUN npm run build
+
+# Stage 2 -- runtime image: the API plus the built UI, on one port.
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    && rm -rf /var/lib/apt/lists/*
+COPY pyproject.toml README.md LICENSE ./
+COPY src ./src
 
-# Copy requirements
-COPY pyproject.toml .
+RUN pip install --no-cache-dir ".[scrapers]"
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    fastapi \
-    uvicorn[standard] \
-    pdfminer.six \
-    PyPDF2 \
-    firecrawl-core \
-    pypdf
+COPY --from=ui /ui/dist /app/ui
 
-# Copy application
-COPY src/backend ./src/backend
-COPY tests ./tests
+ENV AUDIOBIBLICA_UI_DIR=/app/ui \
+    AUDIOBIBLICA_DATA_DIR=/data
 
 EXPOSE 8000
 

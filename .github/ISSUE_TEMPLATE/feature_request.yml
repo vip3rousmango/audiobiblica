@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest something AudioBiblica should do
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: Describe the job you are trying to get done, not the feature yet. This is the part that helps most.
+      placeholder: I want to find which of my preamps has enough gain for a ribbon mic without opening every manual.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help
+      description: What should AudioBiblica do that it does not do today? If you have no idea, that is fine — leave it blank.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the app?
+      options:
+        - Overview / first run
+        - Library and equipment catalog
+        - Manuals (PDFs and links)
+        - Research (finding documentation)
+        - Assistant (asking questions)
+        - Settings
+        - Something else
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Keeping it local
+      options:
+        - label: This can work with no internet connection and no paid service (required for the core app)
+          required: false
+        - label: This may need an optional paid service, and that is acceptable to me
+          required: false

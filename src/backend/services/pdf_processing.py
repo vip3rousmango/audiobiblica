@@ -1,18 +1,16 @@
 import io
 import re
-from typing import Dict, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, Optional
 
 import pdfminer.high_level
-import pdfminer.layout
-import pdfminer.pdfinterp
 from pdfminer.converter import TextConverter
 from pdfminer.pdfdocument import PDFDocument
-from pdfminer.pdfinterp import PDFResourceManager
+from pdfminer.pdfinterp import PDFPageInterpreter, PDFResourceManager
 from pdfminer.pdfpage import PDFPage
 from pdfminer.pdfparser import PDFParser
 
 from src.backend.models.equipment import Equipment
-from dataclasses import dataclass
 
 
 @dataclass
@@ -34,32 +32,41 @@ class PDFProcessor:
         # Common patterns for extracting equipment specs from PDFs
         self.patterns = {
             "input_voltage": re.compile(
-                r"input\s*voltage[:=\s]*([\d\.\s]+[vV][a-zA-Z%]*)",
+                r"input\s*voltage\s*[:=]?\s*([\d.]+\s*(?:[-–]\s*[\d.]+\s*)?(?:m?V)\s*(?:AC|DC)?)",
+                re.IGNORECASE,
             ),
             "output_voltage": re.compile(
-                r"output\s*voltage[:=\s]*([\d\.\s]+[vV][a-zA-Z%]*)", re.IGNORECASE
+                r"output\s*voltage\s*[:=]?\s*([\d.]+\s*(?:[-–]\s*[\d.]+\s*)?(?:m?V)\s*(?:AC|DC)?)",
+                re.IGNORECASE,
             ),
             "output_power": re.compile(
-                r"output\s*power[:=\s]*([\d\.\s]+[wW])", re.IGNORECASE
+                r"output\s*power\s*[:=]?\s*([\d.]+\s*(?:kW|W))",
+                re.IGNORECASE,
             ),
             "frequency_response": re.compile(
-                r"frequency\s*response[:=\s]*([\d\.\s]+[hH][zZ]\s*[-~]\s*[\d\.\s]+[hH][zZ])",
+                r"frequency\s*response\s*[:=]?\s*"
+                r"([\d.]+\s*k?Hz\s*(?:to|[-–~])\s*[\d.]+\s*k?Hz)",
                 re.IGNORECASE,
             ),
             "dimensions": re.compile(
-                r"dimensions[:=\s]*([\d\.\s]+[xX][\d\.\s]+[xX][\d\.\s]+[mMmM])", re.IGNORECASE
+                r"dimensions\s*[:=]?\s*([\d.]+\s*[x×]\s*[\d.]+\s*[x×]\s*[\d.]+\s*(?:mm|cm|in))",
+                re.IGNORECASE,
             ),
             "weight": re.compile(
-                r"weight[:=\s]*([\d\.\s]+[kKgGlLbBoOzZ])", re.IGNORECASE
+                r"weight\s*[:=]?\s*([\d.]+\s*(?:kg|g|lbs|lb|oz))",
+                re.IGNORECASE,
             ),
             "signal_to_noise": re.compile(
-                r"signal[-\s]*to[-\s]*noise[:=\s]*([\d\.\s]+[dBdB])", re.IGNORECASE
+                r"signal[-\s]*to[-\s]*noise\s*[:=]?\s*([\d.]+\s*dB)",
+                re.IGNORECASE,
             ),
             "total_harmonic_distortion": re.compile(
-                r"total\s*harmonic\s*distortion[:=\s]*([\d\.\s]+[%])", re.IGNORECASE
+                r"(?:total\s*)?harmonic\s*distortion\s*[:=]?\s*([\d.]+\s*%)",
+                re.IGNORECASE,
             ),
             "impedance": re.compile(
-                r"impedance[:=\s]*([\d\.\s]+[ΩΩohms])", re.IGNORECASE
+                r"impedance\s*[:=]?\s*([\d.]+\s*(?:k?Ω|k?ohms?))",
+                re.IGNORECASE,
             ),
         }
 
@@ -75,8 +82,7 @@ class PDFProcessor:
         """
         try:
             return pdfminer.high_level.extract_text(io.BytesIO(pdf_bytes))
-        except Exception as e:
-            # Fallback to manual extraction if high-level fails
+        except Exception:
             return self._extract_text_manual(pdf_bytes)
 
     def _extract_text_manual(self, pdf_bytes: bytes) -> str:
@@ -95,7 +101,7 @@ class PDFProcessor:
             doc = PDFDocument(parser)
             rsrcmgr = PDFResourceManager()
             device = TextConverter(rsrcmgr, output_string)
-            interpreter = pdfinterp.PDFPageInterpreter(rsrcmgr, device)
+            interpreter = PDFPageInterpreter(rsrcmgr, device)
             for page in PDFPage.create_pages(doc):
                 interpreter.process_page(page)
             device.close()

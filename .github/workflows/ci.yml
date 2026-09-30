@@ -1,79 +1,100 @@
-name: CI/CD Pipeline
+name: CI
 
 on:
   push:
-    branches: [develop, main]
+    branches: ["**"]
   pull_request:
-    branches: [develop]
+    branches: [develop, main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  backend:
+    name: Backend (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11"]
-
+        python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v3
-      
+      - uses: actions/checkout@v4
+
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      
+          cache: pip
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -e .[dev,backend]
-      
-      - name: Lint with ruff
-        run: |
-          pip install ruff
-          ruff check src/backend tests/
-      
-      - name: Type check with mypy
-        run: |
-          pip install mypy
-          mypy src/backend
-      
-      - name: Run tests
-        run: |
-          pip install pytest pytest-asyncio
-          pytest tests/ -v
+          pip install -e ".[dev,scrapers]"
 
-  build:
+      - name: Lint with ruff
+        run: ruff check src/backend tests
+
+      - name: Run tests
+        run: pytest tests -q
+
+  frontend:
+    name: Frontend
     runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    
+    defaults:
+      run:
+        working-directory: src/frontend
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
-      
-      - name: Build package
-        run: |
-          pip install build
-          python -m build
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: src/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check and build
+        run: npm run build
 
   docker:
+    name: Packaged bundle
     runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    
+    needs: [backend, frontend]
     steps:
-      - uses: actions/checkout@v3
-      
-      - name: Build Docker image
+      - uses: actions/checkout@v4
+
+      - name: Build the bundle
+        run: docker compose build
+
+      - name: Start the bundle
+        run: docker compose up -d
+
+      - name: Wait for health
         run: |
-          docker build -t audiobiblica:latest .
-      
-      - name: Test Docker container
-        run: |
-          docker run -d --name audiobiblica-test -p 8000:8000 audiobiblica:latest
-          sleep 5
-          curl http://localhost:8000/health
-          docker rm -f audiobiblica-test
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health; then
+              echo "healthy after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::the bundle did not become healthy within 60s"
+          docker compose logs audiobiblica
+          exit 1
+
+      - name: Assert the UI is served from the same port
+        run: curl -fsS http://127.0.0.1:8000/ | grep -q AudioBiblica
+
+      - name: Assert a deep link falls back to the UI
+        run: curl -fsS http://127.0.0.1:8000/library | grep -q AudioBiblica
+
+      - name: Assert the API answers from the same port
+        run: curl -fsS http://127.0.0.1:8000/api/v1/equipment | grep -q '"equipment"'
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

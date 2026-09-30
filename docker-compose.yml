@@ -1,34 +1,44 @@
-# Docker Compose for development
-version: '3.8'
-
 services:
-  backend:
+  audiobiblica:
     build: .
+    image: ghcr.io/audiobiblica/audiobiblica:latest
     ports:
       - "8000:8000"
-    volumes:
-      - ./src/backend:/app/src/backend
-      - ./tests:/app/tests
-      - ./uploads:/app/uploads
     environment:
-      - FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-      - ENVIRONMENT=development
+      AUDIOBIBLICA_DATA_DIR: /data
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      NANOBOT_BASE_URL: ${NANOBOT_BASE_URL:-http://host.docker.internal:8900}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+    volumes:
+      - audiobiblica_data:/data
+    # Makes host.docker.internal resolve on Linux as well as macOS.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Optional: run Ollama in Docker instead of on the host.
+  #   docker compose --profile ollama up -d
+  # and set OLLAMA_BASE_URL=http://ollama:11434 in a local .env file.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama_models:/root/.ollama
+
+  ollama-models:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
     depends_on:
-      - postgres
-
-  postgres:
-    image: postgres:15-alpine
+      - ollama
     environment:
-      - POSTGRES_DB=audiobiblica
-      - POSTGRES_USER=audiobiblica
-      - POSTGRES_PASSWORD=dev_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "sleep 5 && ollama pull llama3.2:3b"]
 
 volumes:
-  postgres_data:
+  audiobiblica_data:
+  ollama_models:

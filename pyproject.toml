@@ -8,12 +8,27 @@ version = "0.1.0"
 description = "Audio equipment knowledge management system with PDF processing, manufacturer scraping, and MCP integration"
 readme = "README.md"
 license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "AudioBiblica contributors" },
+]
+keywords = [
+    "audio",
+    "music",
+    "studio",
+    "manuals",
+    "knowledge-base",
+    "sqlite",
+    "local-first",
+]
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "Intended Audience :: Professional :: Audio Engineers",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Topic :: Multimedia :: Sound/Audio",
 ]
 
 dependencies = [
@@ -22,6 +37,9 @@ dependencies = [
     "pdfminer.six>=2022.11.1",
     "PyPDF2>=3.0",
     "pydantic>=2.0",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+    "mcp>=1.28,<2",
 ]
 
 [project.optional-dependencies]
@@ -33,17 +51,39 @@ dev = [
     "mypy>=1.10",
 ]
 scrapers = [
-    "firecrawl-core>=0.27",
-]
-mcp = [
-    "mcppython>=0.17.0",
+    "firecrawl-py>=4.0",
 ]
 full = [
-    "audiobiblica[dev,scrapers,mcp]",
+    "audiobiblica[dev,scrapers]",
 ]
 
-[project.scripts]
-audiobiblica = "src.backend.main:cli"
+[project.urls]
+Homepage = "https://github.com/audiobiblica/audiobiblica"
+Repository = "https://github.com/audiobiblica/audiobiblica"
+Issues = "https://github.com/audiobiblica/audiobiblica/issues"
+Documentation = "https://github.com/audiobiblica/audiobiblica/blob/main/docs/DEVELOPMENT.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/backend"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "I"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's documented idiom is a call in the parameter default.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
