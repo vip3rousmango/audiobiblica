@@ -44,18 +44,19 @@ jobs:
           python -m pip install --upgrade build
           python -m build
 
+      # `secrets` is not an allowed context in a step `if:`, so the presence of
+      # the token is checked in the shell instead.
       - name: Upload to PyPI
-        if: ${{ secrets.PYPI_TOKEN != '' }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
         run: |
+          if [ -z "${TWINE_PASSWORD}" ]; then
+            echo "::notice::PYPI_TOKEN is not set, so the package was built but not uploaded."
+            exit 0
+          fi
           python -m pip install --upgrade twine
           twine upload --non-interactive dist/*
-
-      - name: Note the skipped upload
-        if: ${{ secrets.PYPI_TOKEN == '' }}
-        run: echo "::notice::PYPI_TOKEN is not set, so the package was built but not uploaded."
 
       - uses: actions/upload-artifact@v4
         with:
