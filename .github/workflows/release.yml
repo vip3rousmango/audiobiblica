@@ -89,9 +89,13 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish
     steps:
+      # Explicit destination: upload-artifact stores the matched files at the
+      # artifact's root (the common parent is stripped), so without this the
+      # files land in the working directory and "files: dist/*" matches nothing.
       - uses: actions/download-artifact@v4
         with:
           name: dist
+          path: dist
 
       - uses: softprops/action-gh-release@v2
         with:
