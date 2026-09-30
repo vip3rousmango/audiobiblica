@@ -51,6 +51,7 @@ from src.backend.services.mobile import (
     MOBILE_COOKIE,
     allowed_origin_regex,
     capture_url,
+    is_local_host,
     is_loopback,
     lan_address,
     mobile_port,
@@ -131,10 +132,19 @@ def create_app() -> FastAPI:
     # Registered before the CORS middleware below on purpose: the last middleware
     # added ends up outermost, and a browser's preflight asks what is allowed
     # before it can send the cookie that would answer this check.
+    #
+    # Two ways of being "this computer", because the client address alone is not
+    # enough once the app runs in a container: Docker publishes the port through
+    # its own forwarder, which rewrites the source of *every* arriving request to
+    # the VM gateway, so the machine's own browser and a phone on the wifi look
+    # identical from in here. The address is still checked first, and the request's
+    # own host name is the fallback: a browser cannot forge it, so a page opened as
+    # localhost is a page on this machine, while a phone arriving at the machine's
+    # network address is not.
     @app.middleware("http")
     async def require_token_from_other_machines(request: Request, call_next):
         client = request.client.host if request.client else None
-        if is_loopback(client):
+        if is_loopback(client) or is_local_host(request.headers.get("host")):
             return await call_next(request)
         token = mobile_token()
         supplied = request.query_params.get("t") or request.cookies.get(MOBILE_COOKIE)

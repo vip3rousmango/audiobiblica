@@ -56,7 +56,21 @@ talks to the bridge. One pairing screen then covers both services.
 
 ## 3. Authentication
 
-**Loopback is trusted.** `127.0.0.0/8`, `::1` and in-process requests need no credential.
+**Two things count as "this computer", and both are checked on every request:**
+
+| Signal | When it applies | Strength |
+| --- | --- | --- |
+| The **client address** is loopback (`127.0.0.0/8`, `::1`, or no address at all) | the run-from-a-checkout workflow, and the container's own healthcheck | strong — not forgeable over a network |
+| The request's **`Host`** names `localhost`, `127.0.0.0/8` or `[::1]` | any install reached through a published port, where the client address is useless | weaker: a browser copies `Host` from the address bar and cannot forge it, but a hand-made request can |
+
+The second rule exists because of a hard platform fact, found by running the published image: **Docker
+Desktop's port forwarder rewrites the source address of every request that arrives through a
+published port to its own VM gateway** (`192.168.65.1` here), so the machine's own browser and a
+phone on the wifi arrive looking identical. Address-only gating answered the owner with `401`. If
+your adapter runs inside a container and calls the app on the host, expect the same flattening: send
+the token and do not design anything that depends on the client address. A `Host` naming the
+machine's *network* address — which is what a phone's URL carries — still requires the pairing token,
+which is the case the gate is for.
 
 **Everything else needs the pairing token.** Same pattern your bridge already uses (`/pair`, then
 `x-studio-bridge-token`), so the two can share one pairing UI:

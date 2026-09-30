@@ -63,13 +63,33 @@ image have both happened. Full procedure: the `verifying-a-tagged-release` skill
 
 ```bash
 gh run watch "$(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')" --exit-status
-gh release view v0.1.2 --json assets --jq '.assets[] | "\(.name) \(.size)"'   # wheel + sdist, non-zero
-docker logout ghcr.io && docker manifest inspect ghcr.io/vip3rousmango/audiobiblica:v0.1.2 | grep -c architecture
-docker pull ghcr.io/vip3rousmango/audiobiblica:v0.1.2                          # must work logged out
-docker run --rm -d -p 8010:8000 ghcr.io/vip3rousmango/audiobiblica:v0.1.2      # then curl /health
+V=0.1.3
+gh release view "v$V" --json assets --jq '.assets[] | "\(.name) \(.size)"'     # wheel + sdist, non-zero
+docker manifest inspect "ghcr.io/vip3rousmango/audiobiblica:v$V" | jq -r '.manifests[].platform.architecture'
+docker run --rm -d --name abi-verify -p 8010:8000 "ghcr.io/vip3rousmango/audiobiblica:v$V"
+sleep 5
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/health   # must be 200, from the host
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8010/          # must be 200 — the app itself
+docker rm -f abi-verify
 ```
 
-Two architectures, two assets, and an anonymous pull that answers `/health` — that is a release.
+Two architectures, two assets, and a booted image that answers **200 from the host** — not just from
+inside the container, where the healthcheck runs. That last distinction is exactly what 0.1.2 got
+wrong: its healthcheck passed while the app answered the owner's browser with 401, because Docker's
+forwarder flattens the client address (see `tests/test_mobile.py` and §3 of `docs/INTEGRATION.md`).
+Anything that changes who is allowed in has to be checked through a published port, from the host,
+or the check is not the check.
+
+Third trap, from the skill: **is the package actually public?** Pulls succeed while logged in either
+way. Check it with an anonymous token rather than `docker logout` (which would disturb the machine's
+own GHCR credentials):
+
+```bash
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository%3Avip3rousmango%2Faudiobiblica%3Apull&service=ghcr.io" | jq -r .token)
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $TOKEN" \
+  -H 'Accept: application/vnd.oci.image.index.v1+json' \
+  https://ghcr.io/v2/vip3rousmango/audiobiblica/manifests/v$V      # 200 = anyone can pull it
+```
 
 ## 6. Watch it arrive on a real install
 
@@ -113,11 +133,12 @@ most — the console integration and the Live reader are prerequisites for the w
 | Version | What ships | Why it is its own release |
 | --- | --- | --- |
 | **0.1.2** | Mobile gear capture (QR pairing, vision read, drafts, **Needs review** tray, photos on the device); `docs/INTEGRATION.md`. | Already written and verified: a capture path that works with no DAW and no cloud, plus the contract another app needs. |
-| **0.1.3** | A **Check again** button that forces the update check past its six-hour cache; the console speaks back: `POST /api/v1/studio/graph` (ports, cables, observed vs expected routes, device snapshot) and the shared **Finding** envelope; `response_model=` on the equipment routes so payload types generate; `manual_search` MCP tool. | Turns the studio console from a consumer into a *source* of physical truth — nothing else can supply that column, and every connection check downstream depends on it — and clears the one rough edge in testing the updater itself. |
-| **0.1.4** | Sessions, offline: read `.als` against the schemas Live ships; opt-in scan of the default folders; **review-first** queue for devices a Set mentions that the catalog does not have; sessions visible next to the gear they use. | The first release that knows what you were actually working on, with no DAW required and no bridge to install. |
-| **0.1.5** | The live bridge: one-click install of the Remote Script into `User Library/Remote Scripts/`, the Control Surface instructions, a diagnostics check for the whole path, live selection and parameter values, session logging. | Opt-in and version-fragile (user Remote Scripts changed behaviour in Live 12.4), so it ships alone, with its own check, once the offline reader is already trusted. |
+| **0.1.3** | *(shipped as a hotfix)* The gate trusted Docker's view of the client address, which the port forwarder flattens, so 0.1.2 answered the owner's own browser with 401 on a Docker install. Now a request naming `localhost` counts as this computer; `tests/test_mobile.py` covers both halves. | A released version that locked people out of their own app outranks anything planned. It also proved the point of step 5: the published image, not the green tick, is what found it. |
+| **0.1.4** | A **Check again** button that forces the update check past its six-hour cache; the console speaks back: `POST /api/v1/studio/graph` (ports, cables, observed vs expected routes, device snapshot) and the shared **Finding** envelope; `response_model=` on the equipment routes so payload types generate; `manual_search` MCP tool. | Turns the studio console from a consumer into a *source* of physical truth — nothing else can supply that column, and every connection check downstream depends on it — and clears the one rough edge in testing the updater itself. |
+| **0.1.5** | Sessions, offline: read `.als` against the schemas Live ships; opt-in scan of the default folders; **review-first** queue for devices a Set mentions that the catalog does not have; sessions visible next to the gear they use. | The first release that knows what you were actually working on, with no DAW required and no bridge to install. |
+| **0.1.6** | The live bridge: one-click install of the Remote Script into `User Library/Remote Scripts/`, the Control Surface instructions, a diagnostics check for the whole path, live selection and parameter values, session logging. | Opt-in and version-fragile (user Remote Scripts changed behaviour in Live 12.4), so it ships alone, with its own check, once the offline reader is already trusted. |
 | **0.2.0** | The A/V wizard: the signal-path view, checklist runs with evidence and `cannot-check` as a first-class answer, pre-flight reports attached to a Session; local model first, nanobot alongside for long runs. | A new surface and a new data model, and the first release whose headline is judgement rather than data. The minor bump is the signal that the API grew a new area. |
-| **0.2.1** | Preset and rack inventory (`.adg`, `.adv`, `.alc`, User Library): what belongs to which device, what has never been opened. | A self-contained payoff of the Sessions work; rides on the reader that 0.1.4 shipped instead of asking for new trust. |
+| **0.2.1** | Preset and rack inventory (`.adg`, `.adv`, `.alc`, User Library): what belongs to which device, what has never been opened. | A self-contained payoff of the Sessions work; rides on the reader that 0.1.5 shipped instead of asking for new trust. |
 
 Deliberately not scheduled yet:
 

@@ -77,6 +77,40 @@ def is_loopback(host: Optional[str]) -> bool:
     return address.is_loopback
 
 
+def is_local_host(host_header: Optional[str]) -> bool:
+    """Whether a request's own ``Host`` names this computer.
+
+    The client address is the better signal and is checked first, but a container
+    does not get one: Docker publishes the port through its own forwarder, which
+    rewrites the source of every arriving request to the VM gateway, so the
+    machine's own browser and a phone on the wifi both arrive as the same address.
+
+    A browser cannot forge ``Host`` — it is copied from the address bar — so a
+    request that names ``localhost`` came from a page opened on this machine. What
+    this gates is someone browsing to the machine's network address from another
+    device; a client that sets the header by hand is deliberately lying rather
+    than opportunity, which is the threat this is here to discourage.
+    """
+    value = (host_header or "").strip().lower()
+    if not value:
+        return False
+    # A Host header is a name, a name:port, or an address — and an IPv6 literal is
+    # either bracketed with a port or bare, where splitting on the first colon
+    # would leave nothing behind.
+    if value.startswith("["):
+        name = value[1:].split("]", 1)[0]  # [::1]:8000
+    elif value.count(":") > 1:
+        name = value  # ::1
+    else:
+        name = value.split(":", 1)[0]
+    if name in {"localhost", "::1"}:
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
 def lan_address() -> Optional[str]:
     """This machine's address on the local network, or ``None`` when it has none.
 
