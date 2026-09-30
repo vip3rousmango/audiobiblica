@@ -18,7 +18,7 @@ Prerequisites: Python 3.10+, Node 18+ (20 recommended), and Docker Desktop only 
 the packaged bundle.
 
 ```bash
-git clone https://github.com/audiobiblica/audiobiblica.git
+git clone https://github.com/vip3rousmango/audiobiblica.git
 cd audiobiblica
 python3 -m venv venv
 ./venv/bin/pip install -e ".[dev,scrapers]"

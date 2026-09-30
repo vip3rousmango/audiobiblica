@@ -58,10 +58,10 @@ full = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/audiobiblica/audiobiblica"
-Repository = "https://github.com/audiobiblica/audiobiblica"
-Issues = "https://github.com/audiobiblica/audiobiblica/issues"
-Documentation = "https://github.com/audiobiblica/audiobiblica/blob/main/docs/DEVELOPMENT.md"
+Homepage = "https://github.com/vip3rousmango/audiobiblica"
+Repository = "https://github.com/vip3rousmango/audiobiblica"
+Issues = "https://github.com/vip3rousmango/audiobiblica/issues"
+Documentation = "https://github.com/vip3rousmango/audiobiblica/blob/main/docs/DEVELOPMENT.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/backend"]

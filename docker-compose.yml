@@ -1,7 +1,7 @@
 services:
   audiobiblica:
     build: .
-    image: ghcr.io/audiobiblica/audiobiblica:latest
+    image: ghcr.io/vip3rousmango/audiobiblica:latest
     ports:
       - "8000:8000"
     environment:

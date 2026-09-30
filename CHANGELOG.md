@@ -50,5 +50,5 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/audiobiblica/audiobiblica/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/audiobiblica/audiobiblica/releases/tag/v0.1.0
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.0

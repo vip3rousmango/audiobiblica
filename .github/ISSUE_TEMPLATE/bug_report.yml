@@ -10,7 +10,7 @@ body:
 
         If the app is telling you something is *missing* — a model, a web-search key, Docker — that is
         probably a setup step rather than a bug. Check
-        [docs/TROUBLESHOOTING.md](https://github.com/audiobiblica/audiobiblica/blob/develop/docs/TROUBLESHOOTING.md)
+        [docs/TROUBLESHOOTING.md](https://github.com/vip3rousmango/audiobiblica/blob/develop/docs/TROUBLESHOOTING.md)
         first; most of those have a one-line fix.
   - type: textarea
     id: what-happened

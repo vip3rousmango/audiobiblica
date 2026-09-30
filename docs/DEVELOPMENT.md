@@ -127,7 +127,7 @@ Every user-visible failure is a plain sentence with a next step. The single plac
 Prerequisites: Python 3.10+, Node 18+ (20 recommended). Docker Desktop only if you want to run the packaged bundle.
 
 ```bash
-git clone https://github.com/audiobiblica/audiobiblica.git
+git clone https://github.com/vip3rousmango/audiobiblica.git
 cd audiobiblica
 python3 -m venv venv
 ./venv/bin/pip install -e ".[dev,scrapers]"

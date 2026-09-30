@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Setup help and common problems
-    url: https://github.com/audiobiblica/audiobiblica/blob/develop/docs/TROUBLESHOOTING.md
+    url: https://github.com/vip3rousmango/audiobiblica/blob/develop/docs/TROUBLESHOOTING.md
     about: Most "it will not start" and "the assistant will not answer" problems are covered here.
   - name: Getting started guide
-    url: https://github.com/audiobiblica/audiobiblica/blob/develop/docs/GETTING-STARTED.md
+    url: https://github.com/vip3rousmango/audiobiblica/blob/develop/docs/GETTING-STARTED.md
     about: Installing Docker, starting the app, and the first three steps.
   - name: Report a security vulnerability
-    url: https://github.com/audiobiblica/audiobiblica/security/advisories/new
+    url: https://github.com/vip3rousmango/audiobiblica/security/advisories/new
     about: Please report vulnerabilities privately, never as a public issue.

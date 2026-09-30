@@ -89,7 +89,7 @@ Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) and the arc
 To run from source instead of Docker, you need Python 3.10+ and Node 18+:
 
 ```bash
-git clone https://github.com/audiobiblica/audiobiblica.git
+git clone https://github.com/vip3rousmango/audiobiblica.git
 cd audiobiblica
 python3 -m venv venv
 ./venv/bin/pip install -e ".[dev,scrapers]"
