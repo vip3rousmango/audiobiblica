@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import json
 import logging
 import os
 import secrets
@@ -18,7 +19,7 @@ from typing import Literal
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
@@ -85,7 +86,7 @@ from src.backend.services.providers import (
     save_provider_key,
 )
 from src.backend.services.research_plan import coverage_for, plan_summary
-from src.backend.services.research_run import run_plan
+from src.backend.services.research_run import event_queue, open_event_queue, run_plan
 from src.backend.services.storage import get_storage, invalidate_connections
 from src.backend.services.updater import (
     cached_release,
@@ -1616,6 +1617,7 @@ async def start_research_run(equipment_id: str, payload: ResearchRunRequest | No
     run_id = str(uuid.uuid4())
     steps = plan_summary(equipment.category)["steps"]
     await run_in_threadpool(storage.create_research_run, run_id, equipment_id, steps, mode)
+    open_event_queue(run_id)
     task = asyncio.create_task(run_plan(storage, run_id, equipment, mode))
     _research_tasks.add(task)
     task.add_done_callback(_research_tasks.discard)
@@ -1641,6 +1643,46 @@ async def get_research_run(run_id: str) -> dict:
     if not run:
         raise HTTPException(status_code=404, detail="No such research run.")
     return {"run": run}
+
+@app.get("/api/v1/research/runs/{run_id}/stream")
+async def stream_research_run(run_id: str):
+    """Watch a run as it happens: one event per step, then the finished run.
+
+    Server-sent events rather than a poll, because a tree that grows is the point — a client should
+    see each node the moment it is produced, not up to a second and a half later. The current state
+    is sent first, so a client that arrives late still gets the whole plan.
+    """
+    storage = get_storage()
+    run = await run_in_threadpool(storage.get_research_run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="No such research run.")
+    queue = event_queue(run_id)
+
+    async def events():
+        def frame(payload: dict) -> str:
+            return f"data: {json.dumps(payload)}\n\n"
+
+        yield frame({"type": "run", "run": run})
+        if run["status"] != "running" or queue is None:
+            # Nothing is happening: say so and stop, rather than holding a connection open.
+            yield frame({"type": "finished", "run": run})
+            return
+        while True:
+            try:
+                # A comment every fifteen seconds keeps a proxy from closing an idle stream.
+                event = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            yield frame(event)
+            if event.get("type") == "finished":
+                return
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 class ApproveRequest(BaseModel):

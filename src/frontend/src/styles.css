@@ -626,3 +626,45 @@ p { line-height: 1.62; }
 .provider-key { display: flex; gap: 8px; align-items: center; }
 .provider-key input { min-width: 190px; min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; outline: none; background: #0d1516; color: var(--text); font-size: .7rem; }
 .provider-status { font-family: var(--font-mono); font-size: .62rem; color: var(--muted); }
+
+/* --- The run as a tree of data -----------------------------------------------
+   Nested lists with tree roles, not a drawn diagram: the connectors are borders,
+   the levels are the derivation, and every subtree starts collapsed to a count
+   because a forty-node run is unreadable as a list. Motion is limited to a node
+   arriving where it belongs — anything that keeps moving after the work stops is
+   noise, and it is switched off entirely for anyone who asks for less of it. */
+.run-tree, .run-tree ul { margin: 0; padding: 0; list-style: none; }
+.run-tree { display: grid; gap: 2px; }
+.tree-children { margin-inline-start: 12px; padding-inline-start: 14px; border-inline-start: 1px solid var(--border); display: grid; gap: 2px; }
+.tree-node { min-width: 0; }
+.tree-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 7px; cursor: default; }
+.tree-row:focus-visible, .tree-focused { outline: none; background: rgba(140, 186, 255, .07); box-shadow: inset 0 0 0 1px rgba(140, 186, 255, .25); }
+.tree-row-root { background: rgba(255, 255, 255, .02); }
+.tree-mark { width: 14px; color: var(--muted); font-family: var(--font-mono); font-size: .7rem; text-align: center; }
+.tree-label { min-width: 0; color: var(--text-soft); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; }
+.tree-row-root .tree-label { color: var(--text); font-weight: 600; }
+.tree-label a { color: var(--teal); text-decoration: none; }
+.tree-label a:hover { text-decoration: underline; }
+.tree-tags { display: inline-flex; gap: 6px; }
+.tree-meta { margin-inline-start: auto; color: var(--muted); font-family: var(--font-mono); font-size: .62rem; white-space: nowrap; }
+.tree-note { margin: 0 0 4px 30px; color: var(--muted); font-size: .66rem; line-height: 1.5; }
+.tree-quote { margin: 0 0 6px 30px; padding-inline-start: 10px; border-inline-start: 2px solid var(--border-strong); color: var(--text-soft); font-size: .66rem; line-height: 1.55; }
+.tree-row-source { padding-block: 5px; }
+.tree-row-more { padding-block: 4px; }
+.tree-row-more .tree-meta { margin-inline-start: 0; }
+
+.step-done > .tree-mark, .tree-row.step-done .tree-mark { color: var(--acid); }
+.tree-row.step-empty .tree-mark { color: var(--faint); }
+.tree-row.step-needs-key .tree-mark { color: var(--amber); }
+.tree-row.step-failed .tree-mark { color: var(--red); }
+.tree-row.step-running .tree-mark { color: var(--teal); animation: pulse 1.4s ease-in-out infinite; }
+
+/* A source arriving is the one thing worth animating: it is where the work shows. */
+@media (prefers-reduced-motion: no-preference) {
+  .tree-children { animation: tree-open .18s ease-out; }
+  @keyframes tree-open { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+}
+.run-view-toggle { display: inline-flex; gap: 4px; }
+.run-view-toggle button { min-height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; color: var(--muted); font-size: .68rem; cursor: pointer; }
+.run-view-toggle button.active { border-color: var(--border-strong); background: var(--panel-raised); color: var(--text); }
+.tree-question { color: var(--muted); font-style: italic; }

@@ -16,6 +16,8 @@ import {
   startResearchRun,
 } from '../lib/api';
 import { Icon } from '../components/Icon';
+import RunTree from '../components/RunTree';
+import { streamResearchRun } from '../lib/runStream';
 import { Button, EmptyState, InlineNotice, PageHeader, StatusDot, Surface } from '../components/ui';
 
 /* Research, as a run you watch rather than a row of buttons.
@@ -60,6 +62,8 @@ const ResearchAgent: React.FC = () => {
   const [notice, setNotice] = useState<{ tone: 'info' | 'warning' | 'success' | 'danger'; text: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyFinding, setBusyFinding] = useState<string | null>(null);
+  const [view, setView] = useState<'tree' | 'rail'>('tree');
+  const [streaming, setStreaming] = useState(false);
   const runIdRef = useRef<string | null>(null);
 
   const refreshLists = useCallback(async () => {
@@ -98,9 +102,43 @@ const ResearchAgent: React.FC = () => {
     return () => { cancelled = true; };
   }, [selectedId]);
 
-  /* A run is watched, not awaited: the server does the work and the page follows the steps. */
+  /* A run is watched, not awaited: the server streams each step the moment it is produced, and the
+     steps are applied where they belong so the tree grows rather than re-rendering. */
   useEffect(() => {
-    if (!running || !runIdRef.current) return;
+    const runId = runIdRef.current;
+    if (!running || !runId) return;
+    let finished = false;
+    const stop = streamResearchRun(
+      runId,
+      (event) => {
+        if (event.type === 'finished') {
+          finished = true;
+          setRun(event.run ?? null);
+          setRunning(false);
+          runIdRef.current = null;
+          void refreshLists();
+          return;
+        }
+        if (event.type === 'run' && event.run) {
+          setRun(event.run);
+          return;
+        }
+        if (event.type === 'step' && event.step_id) {
+          setRun((current) => current && current.steps
+            ? { ...current, steps: current.steps.map((step) => step.step_id === event.step_id
+                ? { ...step, state: event.state ?? step.state, detail: event.detail ?? null, error: event.error ?? null, evidence: event.evidence ?? step.evidence }
+                : step) }
+            : current);
+        }
+      },
+      () => { if (!finished) setStreaming(false); },
+    );
+    return stop;
+  }, [running, refreshLists]);
+
+  /* The fallback: if the stream cannot be used, the run is still followed, just less smoothly. */
+  useEffect(() => {
+    if (!running || streaming || !runIdRef.current) return;
     const timer = window.setInterval(() => {
       void getResearchRun(runIdRef.current as string)
         .then((current) => {
@@ -114,7 +152,7 @@ const ResearchAgent: React.FC = () => {
         .catch(() => undefined);
     }, POLL_MS);
     return () => window.clearInterval(timer);
-  }, [running, refreshLists]);
+  }, [running, streaming, refreshLists]);
 
   const start = async () => {
     if (!selectedId) return;
@@ -123,6 +161,7 @@ const ResearchAgent: React.FC = () => {
       const started = await startResearchRun(selectedId);
       runIdRef.current = started.id;
       setRun(started);
+      setStreaming(true);
       setRunning(true);
     } catch (caught) {
       setNotice({ tone: 'danger', text: caught instanceof Error ? caught.message : 'That run could not start.' });
@@ -273,7 +312,14 @@ const ResearchAgent: React.FC = () => {
             {run && (
               <>
                 {run.summary && <p className="run-summary">{run.summary}</p>}
-                <div className="research-plan">
+                <div className="run-view-toggle" role="group" aria-label="How to show the run">
+                  <button className={view === 'tree' ? 'active' : ''} aria-pressed={view === 'tree'} onClick={() => setView('tree')}>Tree</button>
+                  <button className={view === 'rail' ? 'active' : ''} aria-pressed={view === 'rail'} onClick={() => setView('rail')}>List</button>
+                </div>
+                {view === 'tree' && (
+                  <RunTree steps={steps} plan={plan} running={running} summary={run.summary} />
+                )}
+                {view === 'rail' && <div className="research-plan">
                   {steps.map((step) => {
                     const copy = STATE_COPY[step.state] ?? STATE_COPY.queued;
                     return (
@@ -305,7 +351,7 @@ const ResearchAgent: React.FC = () => {
                       </article>
                     );
                   })}
-                </div>
+                </div>}
               </>
             )}
           </div>

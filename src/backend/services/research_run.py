@@ -13,6 +13,7 @@ keys at all still asks every question and reports which ones it could not answer
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -262,6 +263,30 @@ async def _keyed_search(provider_id: str, equipment, step, words: list[str]) -> 
     return StepResult("done", f"Found {len(outcome.sources)} source(s).", [source.as_dict() for source in outcome.sources])
 
 
+#: One queue per run in flight, so a watcher can be told what is happening as it happens.
+#: In-process on purpose: a run lives as long as the server does, and a restarted server has
+#: runs in the catalog whose streams simply read as finished.
+_run_queues: dict[str, "asyncio.Queue[dict]"] = {}
+
+
+def open_event_queue(run_id: str) -> "asyncio.Queue[dict]":
+    """Start collecting events for a run. Called before the work begins."""
+    queue: "asyncio.Queue[dict]" = asyncio.Queue()
+    _run_queues[run_id] = queue
+    return queue
+
+
+def event_queue(run_id: str) -> "asyncio.Queue[dict] | None":
+    return _run_queues.get(run_id)
+
+
+async def _emit(run_id: str, event: dict) -> None:
+    """Tell a watcher, if anybody is watching. Losing an event is never a failure."""
+    queue = _run_queues.get(run_id)
+    if queue is not None:
+        await queue.put(event)
+
+
 #: Which tool serves which step id. Anything not here is served by a keyed search named by the step's
 #: `tool`, which is how the plan and this table stay in step: a step naming a service is a search.
 _TOOLS = {
@@ -334,6 +359,17 @@ async def run_plan(storage, run_id: str, equipment, mode: str = "planned") -> di
             evidence=result.evidence,
             finished=True,
         )
+        await _emit(
+            run_id,
+            {
+                "type": "step",
+                "step_id": step["step_id"],
+                "state": result.state,
+                "detail": result.detail,
+                "error": result.error,
+                "evidence": result.evidence,
+            },
+        )
         if result.found_something:
             found += 1
             await run_in_threadpool(
@@ -357,6 +393,9 @@ async def run_plan(storage, run_id: str, equipment, mode: str = "planned") -> di
 
     status = "finished" if not failed else "finished-with-errors"
     await run_in_threadpool(storage.finish_research_run, run_id, status, summary)
+    finished = await run_in_threadpool(storage.get_research_run, run_id)
+    await _emit(run_id, {"type": "finished", "run": finished})
+    _run_queues.pop(run_id, None)
     return {
         "run_id": run_id,
         "status": status,

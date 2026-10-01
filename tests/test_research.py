@@ -11,6 +11,7 @@ steps would make the app useless to somebody who brought no keys.
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -448,3 +449,53 @@ def test_borrowed_services_are_not_called_always_available():
         "easyschematic_templates",
     ]
     get_config().delete("assistant.api_key")
+
+
+def test_a_run_streams_its_steps_and_closes(client, monkeypatch):
+    """The data tree is fed by this stream, so its contract is worth pinning.
+
+    It sends the current state first — so a client that arrives late still gets the whole plan —
+    then one event per step, then the finished run, and stops. Polling stays as the fallback; this
+    is what makes the tree grow rather than blink.
+    """
+    from src.backend.services import research_run as runner
+
+    device = client.post(
+        "/api/v1/equipment",
+        json={"name": "Stream Probe", "manufacturer": "Test", "category": "Monitor", "model": "S1"},
+    ).json()["equipment"]
+
+    async def instant_tool(storage_, equipment, step):
+        if step["step_id"] != "drivers":
+            return runner.StepResult("empty", "nothing here", [])
+        return runner.StepResult(
+            "done", "Found it.", [{"title": "A source", "url": "https://example.com/a", "snippet": "woofer"}]
+        )
+
+    monkeypatch.setattr(runner, "_run_step", instant_tool)
+    started = client.post(f"/api/v1/equipment/{device['id']}/research/run", json={"mode": "planned"}).json()["run"]
+
+    frames = []
+    with client.stream("GET", f"/api/v1/research/runs/{started['id']}/stream") as response:
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert response.headers["cache-control"] == "no-store"
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                frames.append(json.loads(line[6:]))
+            if frames and frames[-1].get("type") == "finished":
+                break
+
+    assert frames[0]["type"] == "run", "the current state comes first"
+    assert len(frames[0]["run"]["steps"]) == len(research_plan("Monitor"))
+    step_events = [frame for frame in frames if frame["type"] == "step"]
+    assert len(step_events) == len(research_plan("Monitor")), "one event per step"
+    assert {event["step_id"] for event in step_events} == {step.id for step in research_plan("Monitor")}
+    done = next(event for event in step_events if event["step_id"] == "drivers")
+    assert done["state"] == "done" and done["evidence"][0]["url"] == "https://example.com/a"
+    assert frames[-1]["type"] == "finished" and frames[-1]["run"]["status"] == "finished"
+
+    # A finished run's stream says so at once instead of holding the connection open.
+    with client.stream("GET", f"/api/v1/research/runs/{started['id']}/stream") as again:
+        body = "".join(again.iter_text())
+    assert body.count("data: ") == 2 and '"type": "finished"' in body
