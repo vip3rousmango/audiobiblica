@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.9] - 2026-10-01
 
 ### Added
 
@@ -31,6 +31,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - EasySchematic's own agent bridge cannot set ports (its Beta says so), and writing into its shared
   library is gated. The file path this release uses is the one that carries real ports; the
   panel says all of this instead of pretending otherwise.
+
+## [Unreleased]
+
+Nothing yet.
 
 ## [0.1.8] - 2026-10-01
 
@@ -265,9 +269,10 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.7...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.9...HEAD
 [0.1.7]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.7
 [0.1.8]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.8
+[0.1.9]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.9
 [0.1.6]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.4

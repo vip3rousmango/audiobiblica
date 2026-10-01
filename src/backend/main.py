@@ -44,6 +44,19 @@ from src.backend.services.catalog_archive import (
     restore_archive,
 )
 from src.backend.services.diagnostics import collect_diagnostics
+from src.backend.services.easyschematic import (
+    CONNECTOR_LABELS,
+    ES_CONNECTOR_TYPES,
+    ES_DEVICE_TYPE_CATEGORY,
+    ES_DIRECTIONS,
+    ES_SIGNAL_TYPES,
+    build_devices,
+    catalog_rows,
+    install_script_text,
+    probe_easyschematic,
+    suggested_device_type,
+    suggested_ports,
+)
 from src.backend.services.gear_scan import (
     build_prompt,
     match_existing,
@@ -2121,6 +2134,88 @@ async def service_info() -> dict:
         "services": services,
     }
 
+
+
+# ----------------------------------------------------------------------
+# EasySchematic: author and export devices for the user's drawing app
+# ----------------------------------------------------------------------
+class EasyschematicExportRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    ports: dict[str, list[dict]] = Field(default_factory=dict)
+    device_types: dict[str, str] = Field(default_factory=dict)
+
+
+def _es_export_payload(ids: list[str] | None, ports: dict, device_types: dict) -> dict:
+    rows, missing = catalog_rows(ids)
+    export = build_devices(rows, ports, device_types)
+    export["skipped"] = [*export["skipped"], *missing]
+    return export
+
+
+@app.get("/api/v1/easyschematic/status")
+async def easyschematic_status_route() -> dict:
+    """What part of a local EasySchematic is there, and the install option when none is.
+
+    A probe, never a write: detection tells the difference between "use this one" and
+    "install one", which is exactly the information a second install would destroy.
+    """
+    return await probe_easyschematic()
+
+
+@app.get("/api/v1/easyschematic/suggest")
+async def easyschematic_suggest_route(equipment_id: str, device_type: str | None = None) -> dict:
+    """The device kind and first-draft ports this device would be sent as, plus the vocabulary
+    the editor needs to change either. `device_type` asks for the drafts of a specific kind: the
+    editor re-asks when the kind changes, so "computer" shows a computer's ports rather than none.
+    """
+    equipment = get_storage().get_equipment(equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    chosen = device_type if device_type in ES_DEVICE_TYPE_CATEGORY else None
+    offered = chosen or suggested_device_type(equipment.category, equipment.name, equipment.model)
+    return {
+        "equipment_id": equipment_id,
+        "suggested_device_type": offered,
+        "ports": suggested_ports(offered) if offered else [],
+        "vocabulary": {
+            "device_types": ES_DEVICE_TYPE_CATEGORY,
+            "connectors": sorted(ES_CONNECTOR_TYPES),
+            "connector_labels": CONNECTOR_LABELS,
+            "signals": sorted(ES_SIGNAL_TYPES),
+            "directions": sorted(ES_DIRECTIONS),
+        },
+    }
+
+
+@app.post("/api/v1/easyschematic/export")
+async def easyschematic_export_route(payload: EasyschematicExportRequest) -> dict:
+    """Author devices as EasySchematic templates, honoring the sender's ports and kind choices,
+    and report everything that was skipped or adjusted rather than fail the batch."""
+    return _es_export_payload(payload.ids or None, payload.ports, payload.device_types)
+
+
+@app.get("/api/v1/easyschematic/export")
+async def easyschematic_export_download(ids: str = "", download: bool = False):
+    """The same export as a file their EasySchematic imports; no ids means the whole catalog.
+
+    `download` adds the attachment header so the browser saves it rather than showing it.
+    """
+    id_list = [value.strip() for value in ids.split(",") if value.strip()]
+    export = _es_export_payload(id_list or None, {}, {})
+    if not download:
+        return export
+    body = json.dumps(export, indent=2)
+    return Response(
+        body,
+        media_type="application/json",
+        headers={"Content-Disposition": 'attachment; filename="audiobiblica-devices.json"'},
+    )
+
+
+@app.get("/api/v1/easyschematic/install-script")
+async def easyschematic_install_script_route() -> Response:
+    """The scaffold script, served for `bash <(curl …)`; it checks first and never double-installs."""
+    return Response(install_script_text(), media_type="text/plain")
 
 
 # Registered last, once every API route above exists.

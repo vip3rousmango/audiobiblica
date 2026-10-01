@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { addManual, batchUpdateEquipment, createEquipment, deleteEquipment, deleteManual, deletePhoto, Equipment, listEquipment, Manual, updateEquipment, uploadManualPdf, getApiBaseUrl } from '../lib/api';
 import { Icon } from '../components/Icon';
 import { Dropdown } from '../components/Dropdown';
+import SendToEasySchematic from '../components/SendToEasySchematic';
 import { Button, EmptyState, InlineNotice, PageHeader, Surface } from '../components/ui';
 
 type ViewMode = 'grid' | 'table';
@@ -255,6 +256,8 @@ const EquipmentDrawer: React.FC<{
               </div>
             </section>
           )}
+
+          <SendToEasySchematic equipmentId={equipment.id} />
 
           <InlineNotice tone="info" icon="sparkles">Uploaded PDF text and linked documentation are available to the AV assistant and MCP tools.</InlineNotice>
         </div>

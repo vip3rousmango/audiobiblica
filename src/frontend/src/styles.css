@@ -570,6 +570,24 @@ p { line-height: 1.62; }
 .link-button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
 .inline-notice code { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel); font-family: var(--font-mono); font-size: .92em; color: var(--text-soft); }
 
+.es-port-row {
+  display: grid;
+  grid-template-columns: 1.5fr 1.3fr 1fr 0.9fr auto;
+  gap: 6px;
+  align-items: end;
+}
+
+.es-open-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.es-command code {
+  display: block;
+  white-space: pre-wrap;
+}
+
 /* --- Research: the plan, the run, the queue, the matrix ----------------------
    A run is a thing you watch, so the shapes here are about state at a glance:
    a rail of steps with one colour per outcome, and grid cells that say missing

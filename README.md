@@ -29,6 +29,7 @@ AudioBiblica is one place to keep all of it, on your machine:
 - **Plain questions, real answers.** "What are the input and output connections on the interface I just added?" The assistant reads *your* catalog to answer — not the internet.
 - **Notes that stay found.** Research you gather about a piece of gear is attached to that piece of gear, not buried in a browser history.
 - **Your gear, photographed.** Point your phone at a device, scan the code in Settings, and the app writes the entry for you — one device, or a whole rack in a single shot.
+- **Your gear, drawn.** Send any device to EasySchematic with the ports it really has and drop it on a diagram, or send the whole catalog as one file. If EasySchematic isn't on your computer, one command installs it — after checking it isn't already there.
 
 ```text
    your gear  ──►  your catalog  ──►  a question  ──►  an answer you can act on

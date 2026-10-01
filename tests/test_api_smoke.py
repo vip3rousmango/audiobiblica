@@ -113,6 +113,13 @@ def test_manual_fallback_extraction_works():
     ("GET", "/api/v1/research/plan", None, 200),
     ("GET", "/api/v1/research/queue", None, 200),
     ("GET", "/api/v1/research/coverage", None, 200),
+    ("GET", "/api/v1/service/info", None, 200),
+    # What is running next door is environment-dependent; the answer itself never 500s.
+    ("GET", "/api/v1/easyschematic/status", None, None),
+    ("GET", "/api/v1/easyschematic/export", None, 200),
+    ("POST", "/api/v1/easyschematic/export", {"ids": [], "ports": {}, "device_types": {}}, 200),
+    ("GET", "/api/v1/easyschematic/suggest?equipment_id=nope", None, 404),
+    ("GET", "/api/v1/easyschematic/install-script", None, 200),
 ])
 def test_routes_answer_without_server_error(client, method, path, body, expect):
     response = client.request(method, path, json=body)

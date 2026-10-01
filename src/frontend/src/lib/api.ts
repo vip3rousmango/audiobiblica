@@ -816,6 +816,89 @@ export async function getServiceInfo(): Promise<ServiceInfo> {
   return request<ServiceInfo>('/api/v1/service/info');
 }
 
+/* --- EasySchematic: the drawing app next door --------------------------------- */
+
+export interface EsProbe {
+  up: boolean;
+  url: string | null;
+  templates?: number | null;
+}
+
+export interface EasyschematicStatus {
+  detected: { ui: EsProbe | null; api: EsProbe | null; mcp: EsProbe | null };
+  running: boolean;
+  advice: string;
+  install: { script_path: string; one_line: string; steps: string[] };
+}
+
+export interface EsPort {
+  label: string;
+  signalType: string;
+  connectorType: string;
+  direction: string;
+}
+
+/* The imported template shape, minus their id (their import generates one). */
+export interface EsDevice {
+  label: string;
+  deviceType: string;
+  manufacturer: string;
+  modelNumber: string | null;
+  searchTerms: string[];
+  ports: EsPort[];
+}
+
+export interface EsExport {
+  devices: EsDevice[];
+  skipped: { id: string; name: string; reason: string }[];
+  warnings: string[];
+}
+
+export interface EsVocabulary {
+  device_types: Record<string, string>;
+  connectors: string[];
+  connector_labels: Record<string, string>;
+  signals: string[];
+  directions: string[];
+}
+
+export interface EsSuggestion {
+  equipment_id: string;
+  suggested_device_type: string | null;
+  ports: EsPort[];
+  vocabulary: EsVocabulary;
+}
+
+export async function getEasyschematicStatus(): Promise<EasyschematicStatus> {
+  return request<EasyschematicStatus>('/api/v1/easyschematic/status');
+}
+
+export async function getEsSuggestion(equipmentId: string, deviceType?: string): Promise<EsSuggestion> {
+  const kind = deviceType ? `&device_type=${encodeURIComponent(deviceType)}` : '';
+  return request<EsSuggestion>(
+    `/api/v1/easyschematic/suggest?equipment_id=${encodeURIComponent(equipmentId)}${kind}`,
+  );
+}
+
+export async function exportEsDevices(payload: {
+  ids: string[];
+  ports?: Record<string, EsPort[]>;
+  device_types?: Record<string, string>;
+}): Promise<EsExport> {
+  return request<EsExport>('/api/v1/easyschematic/export', {
+    method: 'POST',
+    body: JSON.stringify({
+      ids: payload.ids,
+      ports: payload.ports ?? {},
+      device_types: payload.device_types ?? {},
+    }),
+  });
+}
+
+export function esInstallScriptUrl(): string {
+  return `${API_BASE_URL}/api/v1/easyschematic/install-script`;
+}
+
 export function getApiBaseUrl(): string {
   return API_BASE_URL;
 }

@@ -129,6 +129,10 @@ class AudioBiblicaMCPServer:
             return await self._batch_scrape_urls(arguments)
         elif tool_name == "search_web":
             return await self._search_web(arguments)
+        elif tool_name == "easyschematic_status":
+            return await self._easyschematic_status()
+        elif tool_name == "easyschematic_export_devices":
+            return self._easyschematic_export_devices(arguments)
 
         else:
             return MCPToolResult(
@@ -390,6 +394,24 @@ class AudioBiblicaMCPServer:
                 error=str(e),
             )
 
+    async def _easyschematic_status(self) -> MCPToolResult:
+        """What part of the user's local EasySchematic is running, and the install option if not."""
+        from src.backend.services.easyschematic import probe_easyschematic
+
+        return MCPToolResult(success=True, data=await probe_easyschematic())
+
+    def _easyschematic_export_devices(self, arguments: Dict[str, Any]) -> MCPToolResult:
+        """Author EasySchematic device templates from catalog rows with the ports the agent supplies."""
+        from src.backend.services.easyschematic import build_devices, catalog_rows
+
+        ids = arguments.get("ids") or []
+        ports = arguments.get("ports") or {}
+        device_types = arguments.get("device_types") or {}
+        rows, missing = catalog_rows(list(ids) or None)
+        export = build_devices(rows, ports, device_types)
+        export["skipped"] = [*export["skipped"], *missing]
+        return MCPToolResult(success=True, data=export)
+
     def _find_manuals(self, manufacturer: str, model: str) -> List[Dict[str, Any]]:
         """Find saved manuals for matching equipment records."""
         from src.backend.services.storage import get_storage
@@ -488,6 +510,27 @@ def create_mcp_protocol_server(audio_server: AudioBiblicaMCPServer) -> FastMCP:
     async def batch_scrape_urls(urls: list[str]) -> dict[str, Any]:
         """Scrape multiple supplied documentation URLs in one Firecrawl batch."""
         return await invoke("batch_scrape_urls", {"urls": urls})
+
+    @server.tool()
+    async def easyschematic_status() -> dict[str, Any]:
+        """Check which parts of the user's local EasySchematic are running, and how to install one that is not."""
+        return await invoke("easyschematic_status", {})
+
+    @server.tool()
+    async def easyschematic_export_devices(
+        ids: list[str],
+        ports: dict[str, Any] | None = None,
+        device_types: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """Author EasySchematic device templates from catalog devices with the sender's real ports.
+
+        `ids` may be empty for the whole catalog; `ports` maps an equipment id to its port list,
+        each port `{label, signalType, connectorType, direction}`; `device_types` maps an id to
+        an EasySchematic device kind (see the export's own suggestions)."""
+        return await invoke(
+            "easyschematic_export_devices",
+            {"ids": ids, "ports": ports or {}, "device_types": device_types or {}},
+        )
 
     return server
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AssistantConfig, clearAssistantCredential, createBackup, DataStatus, getApiBaseUrl, getAssistantConfig, getDataStatus, getMcpStatus, getSetupStatus, importCatalog, listAssistantModels, pullModel, restoreBackup, saveAssistantConfig, testAssistantConnection } from '../lib/api';
 import { Icon } from '../components/Icon';
 import MobileCapture from '../components/MobileCapture';
+import EsSettings from '../components/EsSettings';
 import ResearchSources from '../components/ResearchSources';
 import ServiceInfo from '../components/ServiceInfo';
 import SetupDoctor, { SettingsSection } from '../components/SetupDoctor';
@@ -417,6 +418,7 @@ const Settings: React.FC = () => {
     { id: 'sources', label: 'Research sources', icon: 'research' as const },
     { id: 'mobile', label: 'Mobile capture', icon: 'camera' as const },
     { id: 'doctor', label: 'Check my setup', icon: 'activity' as const },
+    { id: 'easyschematic', label: 'EasySchematic', icon: 'layers' as const },
     { id: 'service', label: 'Service information', icon: 'server' as const },
   ] as const;
 
@@ -523,6 +525,7 @@ const Settings: React.FC = () => {
           {activeSection === 'sources' && <ResearchSources onToast={showToast} />}
           {activeSection === 'mobile' && <MobileCapture onToast={showToast} />}
           {activeSection === 'service' && <ServiceInfo onToast={showToast} />}
+          {activeSection === 'easyschematic' && <EsSettings onToast={showToast} />}
           {activeSection === 'doctor' && (
             <SetupDoctor onRestore={restoreSnapshot} onOpenSection={setActiveSection} onToast={showToast} />
           )}

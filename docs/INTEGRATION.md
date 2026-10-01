@@ -510,9 +510,10 @@ Agents — including a nanobot container — talk to AudioBiblica over MCP:
   does.
 - **Auth:** a container is a non-loopback client → present the pairing token (§3).
 
-Tools today (all read-only, catalog + web research): `search_equipment`,
-`get_equipment_specifications`, `find_manuals`, `search_manufacturer_docs`, `search_web`,
-`extract_equipment_specs`, `crawl_manufacturer_site`, `batch_scrape_urls`, `scrape_manufacturer_site`.
+Tools today (all read-only, catalog + web research, plus the EasySchematic pair below):
+`search_equipment`, `get_equipment_specifications`, `find_manuals`, `search_manufacturer_docs`,
+`search_web`, `extract_equipment_specs`, `crawl_manufacturer_site`, `batch_scrape_urls`,
+`scrape_manufacturer_site`, `easyschematic_status`, `easyschematic_export_devices`.
 
 Planned, so your UI can already reserve space: `manual_search(device, topic)` (text search *inside*
 stored manual text), `session_list`, `session_snapshot`, `session_findings`, `machine_audio_devices`,
@@ -525,6 +526,36 @@ the same endpoint for long, session-length runs (its value is a persistent agent
 across an afternoon, not a different result shape). Nothing in the tool surface may assume which one
 is calling, and a container is a non-loopback client, so it needs the pairing token and a matching
 `Host` in the MCP allow-list.
+
+### EasySchematic interop (new in 0.1.9)
+
+EasySchematic is the drawing app the studio console runs — and may run next to this app on the same
+machine. AudioBiblica's half of the wire is authoring: a catalog device plus its *real* ports becomes
+the JSON EasySchematic's own device import accepts.
+
+**REST**
+
+| Route | What |
+| --- | --- |
+| `GET /api/v1/easyschematic/status` | What is actually there: `{detected: {ui, api, mcp}, running, advice, install}`. Each piece is `{up, url}` or `null`, with the library's template count when it answers. A probe, never a write. |
+| `GET /api/v1/easyschematic/suggest?equipment_id=…` | The proposed device kind, first-draft ports, and the full authoring vocabulary (`device_types`, `connectors`, `signals`, `directions`). |
+| `POST /api/v1/easyschematic/export` | `{ids, ports, device_types}` → `{devices, skipped, warnings}`. `ports` maps an id to `[{label, signalType, connectorType, direction}]`; unknown words are dropped with a sentence, never a 500. Empty `ids` = the whole non-archived catalog. |
+| `GET /api/v1/easyschematic/export?ids=…&download=1` | The same, as `audiobiblica-devices.json` (attachment header). |
+| `GET /api/v1/easyschematic/install-script` | The scaffold script, `text/plain`, meant for `bash <(curl …)`. It **detects an existing install first** and exits 0 untouched — never a second install — before cloning `duremovich/EasySchematic` and starting its local stack. |
+
+**MCP tools**: `easyschematic_status()`, `easyschematic_export_devices(ids, ports?, device_types?)` —
+the same surfaces, for an agent. An agent that wants to place a device on a live canvas is told
+honestly by `easyschematic_status` whether their app and its agent bridge are answering; the
+bridge (EasySchematic's own MCP) remains off by default in their bundle, and placement through it
+is not part of 0.1.9.
+
+**The honest boundary, written down** so your UI does not promise it: EasySchematic's *library write*
+is gated (an unauthenticated `POST /templates` answers **401**), and its agent bridge cannot set ports
+("structural fields like ports and slots are not editable in this Beta"). The port-carrying path is
+the file: its import accepts an array of templates with full `ports[]`. The file is what makes "the
+user's M1 laptop, not a Mac Mini" reachable. The vocabulary AudioBiblica validates against is frozen
+from EasySchematic's own source (`SignalType`, `ConnectorType`, `DEVICE_TYPE_TO_CATEGORY`), with
+provenance, in `services/easyschematic.py`.
 
 ---
 
