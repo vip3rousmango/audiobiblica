@@ -7,14 +7,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-- **In progress for 0.1.5:** research is becoming something you watch rather than a row of buttons.
-  Every device now has a *plan* — the questions worth asking of that kind of device, from polar
-  pattern and phantom power for a microphone to clock source for an interface — and each step says
-  which service would answer it. The services are a registry: the page reader, your own manual text
-  and the catalog always work, EasySchematic's device templates need no key, and Firecrawl, web
-  search, Discogs, YouTube and Reverb are keys you can bring (Firecrawl's is the one the web-search
-  panel already stores). A step whose key is missing reports itself as unready rather than returning
-  nothing, and a saved key can be tested in one call.
+Nothing yet.
+
+## [0.1.5] - 2026-09-30
+
+### Added
+
+- **Research is a run you watch, rather than a row of buttons.**
+  Every device has a *plan* — the questions worth asking of that kind of device, from polar pattern and
+  phantom power for a microphone to clock source for an interface, connectors for a monitor — and each
+  step names the service that would answer it.
+- **Sources you bring.** The page reader, your own manual text, the catalog and EasySchematic's device
+  catalogue need no key at all; Firecrawl, a web search, Discogs, YouTube and Reverb are keys you can
+  paste into **Settings → Research sources**, stored on this computer only, each with a one-call test.
+  Firecrawl reuses the key the web-search panel already holds, and OpenAI/Anthropic are borrowed from
+  the assistant instead of asked for twice. A step whose key is missing says so instead of quietly
+  returning nothing.
+- **Runs keep their plan.** Starting a run records all of its steps first, then fills them in as it
+  goes — your catalog, then the text of the manuals you have, then the pages you have linked, then
+  whatever you have brought keys for. A step that found nothing, needs a key, or failed says which.
+- **Nothing counts until you confirm it.** What a run finds waits in a review queue, one finding per
+  question asked with the sources it rests on. Only reviewed findings count towards **what is missing**
+  — the device-by-dimension matrix that answers "what does my studio still not have documented".
 
 ## [0.1.4] - 2026-09-30
 
@@ -167,7 +181,8 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.4
 [0.1.3]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.3
 [0.1.2]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.2

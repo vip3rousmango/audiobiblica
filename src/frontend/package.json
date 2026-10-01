@@ -1,6 +1,6 @@
 {
   "name": "audiobiblica",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Private, local-first catalog of studio gear, with the manuals you own searchable by a local assistant",
   "type": "module",
   "scripts": {
