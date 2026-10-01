@@ -7,7 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **OpenAI and Anthropic claimed to be ready when they were not.** They take their key from
+  **Assistant** rather than from the research panel, and the panel was treating "does not take a key
+  here" as "needs no key at all" — so it showed them as *Always available* with nothing set up. They
+  now say *Not set up yet* and point at the assistant, because a screen about what the app can do is
+  the last place that should overstate it. Found by reading the published 0.1.5's own answer:
+  "6 keyless" for four keyless services.
 
 ## [0.1.5] - 2026-09-30
 

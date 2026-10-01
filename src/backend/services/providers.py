@@ -41,7 +41,14 @@ class Provider:
 
     @property
     def keyless(self) -> bool:
-        return self.key_config is None
+        """Needs nothing at all: no key to paste, nothing to set up elsewhere.
+
+        A service that *borrows* a key is not keyless — it is configured by the assistant panel, and
+        calling it "always available" would tell somebody a service is ready when it is not. The
+        published 0.1.5 answered "6 keyless" for four keyless services and two borrowed ones, which is
+        how this was found.
+        """
+        return self.key_config is None and self.borrowed_from is None
 
 
 PROVIDERS: tuple[Provider, ...] = (

@@ -117,14 +117,24 @@ const ResearchSources: React.FC<ResearchSourcesProps> = ({ onToast }) => {
               <strong>
                 <StatusDot
                   tone={provider.configured ? 'success' : provider.keyless ? 'neutral' : 'warning'}
-                  label={provider.configured ? 'Ready' : provider.keyless ? 'Always available' : 'Needs a key'}
+                  label={
+                    provider.configured
+                      ? 'Ready'
+                      : provider.keyless
+                        ? 'Always available'
+                        : provider.borrowed_from
+                          ? 'Not set up yet'
+                          : 'Needs a key'
+                  }
                 />
                 {provider.label}
               </strong>
               <p>{provider.unlocks}</p>
               {provider.borrowed_from === 'assistant' && (
                 <p className="field-help">
-                  Uses the key already saved in <strong>Assistant</strong> above, so there is nothing to add here.
+                  {provider.configured
+                    ? 'Using the key saved in Assistant above, so there is nothing to add here.'
+                    : 'Set this up in Assistant above — add a key there and research can use it too.'}
                 </p>
               )}
               {results[provider.id] && (

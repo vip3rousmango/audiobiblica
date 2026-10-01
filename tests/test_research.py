@@ -416,3 +416,35 @@ def test_an_excerpt_is_a_window_around_the_mention_not_the_whole_page():
     assert excerpt is not None and "switchable per channel" in excerpt
     assert len(excerpt) < 400, "an excerpt is a sentence-sized window"
     assert _excerpt("nothing relevant here", ["phantom"]) is None
+
+
+def test_borrowed_services_are_not_called_always_available():
+    """A service configured elsewhere must not claim to be ready on its own.
+
+    The published 0.1.5 answered "6 keyless" for four keyless services and two borrowed ones, so the
+    panel told a musician that OpenAI was ready when nothing was set up at all — the opposite of what
+    this screen exists to say.
+    """
+    from src.backend.config import get_config
+
+    for provider_id in ("openai", "anthropic"):
+        provider = get_provider(provider_id)
+        assert provider is not None and provider.borrowed_from == "assistant"
+        assert provider.keyless is False, "borrowing a key is not the same as needing none"
+
+    get_config().delete("assistant.api_key")
+    assert is_configured("openai") is False, "no assistant key means nothing to borrow"
+
+    get_config().set("assistant.api_key", "sk-borrowed")
+    assert is_configured("openai") is True, "an assistant key is used rather than asked for twice"
+    assert is_configured("anthropic") is True, "the same key stands in for whichever provider is set"
+
+    states = {item["id"]: item for item in provider_states()}
+    assert states["openai"]["keyless"] is False and states["openai"]["key_here"] is False
+    assert [item["id"] for item in provider_states() if item["keyless"]] == [
+        "page_reader",
+        "manual_text",
+        "catalog",
+        "easyschematic_templates",
+    ]
+    get_config().delete("assistant.api_key")
