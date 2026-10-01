@@ -115,8 +115,8 @@ curl -s 'http://localhost:8000/api/v1/update/status?refresh=true' | python3 -m j
 ```
 
 Reload the Overview and the notice is there. (Nothing in the interface passes `refresh=true` yet, so
-without this the newest release can take up to six hours to appear — which is why a **Check again**
-button is the first item in 0.1.4.)
+without this the newest release can take up to six hours to appear — a **Check again** button is
+carried by the next release.)
 
 > **The in-app updater pulls the image; it does not refresh `docker-compose.yml`.** That file lives in
 > `~/.audiobiblica/app` and is replaced only by `./scripts/audiobiblica`. So a release that changes the
@@ -135,17 +135,21 @@ or the release is not newer than what is running.
 
 Each version below is one release: independently useful, independently testable through the updater,
 and small enough to describe in a changelog entry without hedging. Ordering is by what unblocks the
-most — the console integration and the Live reader are prerequisites for the wizard, not extras.
+most, and it was re-cut on 2026-09-30: **research before DAW**, because research compounds on what
+already exists (findings, the drawer, the capture flow, MCP) and needs no DAW to work. The full design
+is in the session plan `research-and-interop-plan.md`; this table is the release-level view.
 
 | Version | What ships | Why it is its own release |
 | --- | --- | --- |
-| **0.1.2** | Mobile gear capture (QR pairing, vision read, drafts, **Needs review** tray, photos on the device); `docs/INTEGRATION.md`. | Already written and verified: a capture path that works with no DAW and no cloud, plus the contract another app needs. |
+| **0.1.2** | Mobile gear capture (QR pairing, vision read, drafts, **Needs review** tray, photos on the device); `docs/INTEGRATION.md`. | Shipped. A capture path that works with no DAW and no cloud, plus the contract another app needs. |
 | **0.1.3** | *(shipped as a hotfix)* The gate trusted Docker's view of the client address, which the port forwarder flattens, so 0.1.2 answered the owner's own browser with 401 on a Docker install. Now a request naming `localhost` counts as this computer; `tests/test_mobile.py` covers both halves. | A released version that locked people out of their own app outranks anything planned. It also proved the point of step 5: the published image, not the green tick, is what found it. |
-| **0.1.4** | A **Check again** button that forces the update check past its six-hour cache; the console speaks back: `POST /api/v1/studio/graph` (ports, cables, observed vs expected routes, device snapshot) and the shared **Finding** envelope; `response_model=` on the equipment routes so payload types generate; `manual_search` MCP tool. | Turns the studio console from a consumer into a *source* of physical truth — nothing else can supply that column, and every connection check downstream depends on it — and clears the one rough edge in testing the updater itself. |
-| **0.1.5** | Sessions, offline: read `.als` against the schemas Live ships; opt-in scan of the default folders; **review-first** queue for devices a Set mentions that the catalog does not have; sessions visible next to the gear they use. | The first release that knows what you were actually working on, with no DAW required and no bridge to install. |
-| **0.1.6** | The live bridge: one-click install of the Remote Script into `User Library/Remote Scripts/`, the Control Surface instructions, a diagnostics check for the whole path, live selection and parameter values, session logging. | Opt-in and version-fragile (user Remote Scripts changed behaviour in Live 12.4), so it ships alone, with its own check, once the offline reader is already trusted. |
-| **0.2.0** | The A/V wizard: the signal-path view, checklist runs with evidence and `cannot-check` as a first-class answer, pre-flight reports attached to a Session; local model first, nanobot alongside for long runs. | A new surface and a new data model, and the first release whose headline is judgement rather than data. The minor bump is the signal that the API grew a new area. |
-| **0.2.1** | Preset and rack inventory (`.adg`, `.adv`, `.alc`, User Library): what belongs to which device, what has never been opened. | A self-contained payoff of the Sessions work; rides on the reader that 0.1.5 shipped instead of asking for new trust. |
+| **0.1.4** | *(shipped)* The pairing link is built from the machine's address, worked out by the launcher and forwarded into the container; the panel says so honestly when it cannot; `mobile/status` gained `address_source` and `in_container`. | A container cannot see the host's address, so the code sent phones into Docker's private network. The first release whose change reaches installs only through `./scripts/audiobiblica`, which is now written into step 6. |
+| **0.1.5** | Research: per-category scaffolds, the provider registry (**BYO keys** for Firecrawl, a keyed web search, Discogs, YouTube, Reverb; keyless page reader, manual text, catalog, EasySchematic templates), **planned runs** (deterministic, small model) and **open runs** (nanobot over MCP), a **review queue** for findings, the research UI rebuilt around a run you can watch, and a coverage matrix. | The research queue is the weakest surface in the app and the one a nanobot is genuinely for. Everything it needs — findings storage, MCP tools, the drafts pattern — already exists. |
+| **0.1.6** | EasySchematic interop: export and import its JSON document shape (shared with the studio console), import its CSV cable schedules, use its keyless template API as a research source, and place a chosen set of devices on a live canvas through its MCP bridge. Plus the console's `POST /api/v1/studio/graph`, so the drawing can be told what is actually patched. | EasySchematic is the AV world's interchange format and it is already self-hosted here. It is the wire between this app and the console, and it depends on 0.1.5's provider registry to map gear onto their templates. |
+| **0.1.7** | Sessions, offline: read `.als` against the schemas Live ships; opt-in scan of the default folders; **review-first** queue for devices a Set mentions that the catalog does not have; sessions visible next to the gear they use. | The displaced DAW work. The first release that knows what you were actually working on, with no DAW required and no bridge to install. |
+| **0.1.8** | The live bridge: one-click install of the Remote Script into `User Library/Remote Scripts/`, the Control Surface instructions, a diagnostics check for the whole path, live selection and parameter values, session logging. | Opt-in and version-fragile (user Remote Scripts changed behaviour in Live 12.4), so it ships alone, with its own check, once the offline reader is already trusted. |
+| **0.2.0** | The A/V wizard: the signal-path view, checklist runs with evidence and `cannot-check` as a first-class answer, pre-flight reports attached to a Session; local model first, nanobot alongside for long runs. | A new surface and a new data model, and the first release whose headline is judgement rather than data. The minor bump is the signal that the API grew a new area. It needs research (0.1.5) *and* sessions (0.1.7) *and* the graph (0.1.6) to have anything to cross-check. |
+| **0.2.1** | Preset and rack inventory (`.adg`, `.adv`, `.alc`, User Library): what belongs to which device, what has never been opened. | A self-contained payoff of the Sessions work; rides on the reader that 0.1.7 shipped instead of asking for new trust. |
 
 Deliberately not scheduled yet:
 

@@ -236,6 +236,29 @@ There is no ETag, cursor or `since` parameter yet. The catalog is small, so:
 If you would rather not poll, say so when we build the session endpoints — an SSE stream is a small
 addition and the natural moment to add it.
 
+### Research sources and the plan (new in 0.1.5)
+
+AudioBiblica's research runs lean on optional services, and which ones are configured is public
+information — the keys never are:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/providers` | Every service, what it unlocks, and whether it is configured (`configured`, `keyless`, `borrowed_from`, `testable`). No key is ever returned. |
+| `PUT` | `/api/v1/providers/{id}` | `{ "key": "…" }` — stored locally in `config.json`. `422` for services that need no key. |
+| `DELETE` | `/api/v1/providers/{id}` | Forget it. |
+| `POST` | `/api/v1/providers/{id}/test` | One cheap call: `status` is `ok`, `rejected`, `unreachable`, `unconfigured`, `always` (keyless) or `untested` (no cheap probe exists). |
+| `GET` | `/api/v1/research/plan?equipment_id=…` \\| `?category=…` | The steps a run would perform, each with `tool`, `question`, `dimension` and `ready` — false when the step's key is missing. |
+
+The **provider ids** are the vocabulary: `page_reader`, `manual_text`, `catalog`,
+`easyschematic_templates` (all keyless), `firecrawl`, `web_search`, `discogs`, `youtube`, `reverb`
+(keyed), `openai` and `anthropic` (borrowed from the assistant's settings, not stored twice).
+`firecrawl` deliberately shares the key the web-search panel has always used.
+
+`ready: false` is the honest half of this API and the reason the interface can say "this step needs a
+key" instead of returning an empty result. If you build anything on the plan, honour it the same way.
+The `dimension` values (`manual`, `specs`, `connections`, `sources`, `settings`, `compatibility`) are
+what the coverage matrix counts.
+
 ---
 
 ## 5. Joining a catalog record to a studio gear item

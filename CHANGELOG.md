@@ -7,7 +7,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+- **In progress for 0.1.5:** research is becoming something you watch rather than a row of buttons.
+  Every device now has a *plan* — the questions worth asking of that kind of device, from polar
+  pattern and phantom power for a microphone to clock source for an interface — and each step says
+  which service would answer it. The services are a registry: the page reader, your own manual text
+  and the catalog always work, EasySchematic's device templates need no key, and Firecrawl, web
+  search, Discogs, YouTube and Reverb are keys you can bring (Firecrawl's is the one the web-search
+  panel already stores). A step whose key is missing reports itself as unready rather than returning
+  nothing, and a saved key can be tested in one call.
 
 ## [0.1.4] - 2026-09-30
 

@@ -169,9 +169,46 @@ class Storage:
                     extracted_specs TEXT NOT NULL DEFAULT '{}',
                     confidence REAL NOT NULL DEFAULT 0.5,
                     status TEXT NOT NULL DEFAULT 'pending',
+                    -- Which column of the coverage matrix this finding fills; null for
+                    -- findings written before research had dimensions.
+                    dimension TEXT,
                     created_at REAL NOT NULL,
                     FOREIGN KEY (equipment_id) REFERENCES equipment(id) ON DELETE CASCADE
                 );
+
+                -- A research run: the plan started for one device, and what each step found.
+                -- Steps are written up front as 'queued' so the interface can show the plan
+                -- before any work has happened.
+                CREATE TABLE IF NOT EXISTS research_runs (
+                    id TEXT PRIMARY KEY,
+                    equipment_id TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'planned',
+                    status TEXT NOT NULL DEFAULT 'running',
+                    summary TEXT,
+                    created_at REAL NOT NULL,
+                    finished_at REAL,
+                    FOREIGN KEY (equipment_id) REFERENCES equipment(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS research_steps (
+                    run_id TEXT NOT NULL,
+                    step_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    tool TEXT NOT NULL,
+                    dimension TEXT NOT NULL,
+                    needs_key TEXT,
+                    state TEXT NOT NULL DEFAULT 'queued',
+                    detail TEXT,
+                    error TEXT,
+                    evidence_json TEXT NOT NULL DEFAULT '[]',
+                    started_at REAL,
+                    finished_at REAL,
+                    PRIMARY KEY (run_id, step_id),
+                    FOREIGN KEY (run_id) REFERENCES research_runs(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_research_runs_equipment ON research_runs(equipment_id);
+                CREATE INDEX IF NOT EXISTS idx_research_steps_run ON research_steps(run_id);
 
                 CREATE INDEX IF NOT EXISTS idx_equipment_manufacturer ON equipment(manufacturer);
                 CREATE INDEX IF NOT EXISTS idx_equipment_category ON equipment(category);
@@ -214,6 +251,11 @@ class Storage:
                 )
             if "review_state" not in equipment_columns:
                 conn.execute("ALTER TABLE equipment ADD COLUMN review_state TEXT")
+            finding_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(research_findings)")
+            }
+            if "dimension" not in finding_columns:
+                conn.execute("ALTER TABLE research_findings ADD COLUMN dimension TEXT")
             conn.commit()
         finally:
             conn.close()
@@ -269,6 +311,7 @@ class Storage:
             "extracted_specs": json.loads(row["extracted_specs"] or "{}"),
             "confidence": row["confidence"],
             "status": row["status"],
+            "dimension": row["dimension"] if "dimension" in row.keys() else None,
             "created_at": _iso(row["created_at"]),
         }
 
@@ -583,7 +626,7 @@ class Storage:
                 conn.execute(
                     """
                     UPDATE research_findings SET query = ?, title = ?, content = ?,
-                        extracted_specs = ?, confidence = ?, status = ?, created_at = ?
+                        extracted_specs = ?, confidence = ?, status = ?, dimension = ?, created_at = ?
                     WHERE id = ? AND equipment_id = ?
                     """,
                     (
@@ -593,6 +636,7 @@ class Storage:
                         json.dumps(finding.get("extracted_specs", {})),
                         finding.get("confidence", 0.5),
                         finding.get("status", "completed"),
+                        finding.get("dimension"),
                         time.time(),
                         finding_id,
                         equipment_id,
@@ -603,8 +647,8 @@ class Storage:
                 conn.execute(
                     """
                     INSERT INTO research_findings
-                        (id, equipment_id, query, source_url, title, content, extracted_specs, confidence, status, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        (id, equipment_id, query, source_url, title, content, extracted_specs, confidence, status, dimension, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         finding_id,
@@ -616,6 +660,7 @@ class Storage:
                         json.dumps(finding.get("extracted_specs", {})),
                         finding.get("confidence", 0.5),
                         finding.get("status", "completed"),
+                        finding.get("dimension"),
                         created_at,
                     ),
                 )
@@ -663,6 +708,159 @@ class Storage:
             )
             return [self._row_to_research_finding(row) for row in cursor.fetchall()]
 
+
+    # --- research runs -------------------------------------------------------
+    # A run is a plan being worked through for one device. The steps are written
+    # before any work happens, so the interface can show what is about to be asked
+    # and then fill it in, rather than appearing to invent the plan as it goes.
+
+    def _row_to_research_step(self, row: sqlite3.Row) -> dict:
+        return {
+            "step_id": row["step_id"],
+            "title": row["title"],
+            "tool": row["tool"],
+            "dimension": row["dimension"],
+            "needs_key": row["needs_key"],
+            "state": row["state"],
+            "detail": row["detail"],
+            "error": row["error"],
+            "evidence": json.loads(row["evidence_json"] or "[]"),
+            "started_at": _iso(row["started_at"]) or None,
+            "finished_at": _iso(row["finished_at"]) or None,
+        }
+
+    def create_research_run(self, run_id: str, equipment_id: str, steps: list[dict], mode: str = "planned") -> dict:
+        """Open a run and record its plan."""
+        now = time.time()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                INSERT INTO research_runs (id, equipment_id, mode, status, created_at)
+                VALUES (?, ?, ?, 'running', ?)
+                """,
+                (run_id, equipment_id, mode, now),
+            )
+            conn.executemany(
+                """
+                INSERT INTO research_steps
+                    (run_id, step_id, title, tool, dimension, needs_key, state)
+                VALUES (?, ?, ?, ?, ?, ?, 'queued')
+                """,
+                [
+                    (run_id, step["id"], step["title"], step["tool"], step["dimension"], step.get("needs_key"))
+                    for step in steps
+                ],
+            )
+        return self.get_research_run(run_id) or {}
+
+    def update_research_step(
+        self,
+        run_id: str,
+        step_id: str,
+        *,
+        state: str,
+        detail: str | None = None,
+        error: str | None = None,
+        evidence: list[dict] | None = None,
+        started: bool = False,
+        finished: bool = False,
+    ) -> None:
+        """Record what one step is doing, what it found, or why it could not."""
+        now = time.time()
+        with self.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE research_steps
+                SET state = ?,
+                    detail = COALESCE(?, detail),
+                    error = COALESCE(?, error),
+                    evidence_json = COALESCE(?, evidence_json),
+                    started_at = COALESCE(started_at, ?),
+                    finished_at = CASE WHEN ? THEN ? ELSE finished_at END
+                WHERE run_id = ? AND step_id = ?
+                """,
+                (
+                    state,
+                    detail,
+                    error,
+                    json.dumps(evidence) if evidence is not None else None,
+                    now if started else None,
+                    1 if finished else 0,
+                    now,
+                    run_id,
+                    step_id,
+                ),
+            )
+
+    def finish_research_run(self, run_id: str, status: str, summary: str | None = None) -> None:
+        with self.transaction() as conn:
+            conn.execute(
+                "UPDATE research_runs SET status = ?, summary = ?, finished_at = ? WHERE id = ?",
+                (status, summary, time.time(), run_id),
+            )
+
+    def get_research_run(self, run_id: str) -> Optional[dict]:
+        with self.transaction() as conn:
+            row = conn.execute("SELECT * FROM research_runs WHERE id = ?", (run_id,)).fetchone()
+            if row is None:
+                return None
+            steps = conn.execute(
+                "SELECT * FROM research_steps WHERE run_id = ? ORDER BY rowid", (run_id,)
+            ).fetchall()
+            return {
+                "id": row["id"],
+                "equipment_id": row["equipment_id"],
+                "mode": row["mode"],
+                "status": row["status"],
+                "summary": row["summary"],
+                "created_at": _iso(row["created_at"]),
+                "finished_at": _iso(row["finished_at"]) or None,
+                "steps": [self._row_to_research_step(step) for step in steps],
+            }
+
+    def list_research_runs(self, limit: int = 20) -> list[dict]:
+        """Recent runs, newest first, without their steps."""
+        with self.transaction() as conn:
+            rows = conn.execute(
+                "SELECT * FROM research_runs ORDER BY created_at DESC LIMIT ?", (limit,)
+            ).fetchall()
+            return [
+                {
+                    "id": row["id"],
+                    "equipment_id": row["equipment_id"],
+                    "mode": row["mode"],
+                    "status": row["status"],
+                    "summary": row["summary"],
+                    "created_at": _iso(row["created_at"]),
+                    "finished_at": _iso(row["finished_at"]) or None,
+                }
+                for row in rows
+            ]
+
+    def pending_findings(self) -> list[dict]:
+        """Every finding waiting to be reviewed, newest first, across the catalog."""
+        with self.transaction() as conn:
+            rows = conn.execute(
+                """
+                SELECT f.*, e.name AS equipment_name, e.manufacturer AS equipment_manufacturer
+                FROM research_findings AS f
+                JOIN equipment AS e ON e.id = f.equipment_id
+                WHERE f.status = 'pending'
+                ORDER BY f.created_at DESC
+                """
+            ).fetchall()
+            return [
+                {**self._row_to_research_finding(row), "equipment_name": row["equipment_name"], "equipment_manufacturer": row["equipment_manufacturer"]}
+                for row in rows
+            ]
+
+    def set_finding_status(self, finding_id: str, status: str) -> bool:
+        """Approve a queued finding, or move it out of the queue."""
+        with self.transaction() as conn:
+            cursor = conn.execute(
+                "UPDATE research_findings SET status = ? WHERE id = ?", (status, finding_id)
+            )
+            return cursor.rowcount > 0
 
 
 _storage: Optional[Storage] = None

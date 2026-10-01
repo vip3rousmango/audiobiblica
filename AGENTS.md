@@ -96,6 +96,8 @@ Three promises constrain almost every change. Read them before designing somethi
 | `src/backend/services/` | `paths.py` (data dir, catalog recovery, snapshots, logging), `storage.py`, `assistant.py`, `diagnostics.py`, `updater.py`, `catalog_archive.py`, `page_reader.py`, `pdf_processing.py`, `firecrawl_service.py` |
 | `src/backend/services/gear_scan.py` | Prompt, JSON parsing and de-duplication for phone captures (no HTTP, so it is testable with fixed strings) |
 | `src/backend/services/mobile.py` | Pairing token, loopback test, LAN address, capture URL, allowed origins |
+| `src/backend/services/providers.py` | The registry of optional research services: which exist, what each unlocks, where its key lives, and how to test it. Keys are never read back out of it for display. |
+| `src/backend/services/research_plan.py` | What "research this device" means per category — steps, the tool that serves each, and the key it needs. Every step's tool must exist and every plan keeps a keyless subset; both are tested. |
 | `src/backend/mcp/` | MCP tool dispatch and the FastMCP Streamable HTTP app |
 | `src/frontend/src/lib/` | `api.ts` (the single typed client + `friendlyMessage`), `photo.ts` (browser-side downscale before upload), `useUpdate.ts` |
 | `src/frontend/src/components/` | `ui.tsx` primitives, `Layout.tsx`, `SetupChecklist.tsx`, `SetupDoctor.tsx`, `UpdateNotice.tsx`, `NanobotChat.tsx`, `MobileCapture.tsx` |

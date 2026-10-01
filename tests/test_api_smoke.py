@@ -102,6 +102,17 @@ def test_manual_fallback_extraction_works():
     ("DELETE", "/api/v1/photos/nope", None, 404),
     ("POST", "/api/v1/equipment/batch", {"ids": []}, 422),
     ("POST", "/api/v1/equipment/batch", {"ids": ["nope"]}, 422),
+    ("GET", "/api/v1/providers", None, 200),
+    ("PUT", "/api/v1/providers/discogs", {"key": "smoke"}, 200),
+    ("PUT", "/api/v1/providers/nope", {"key": "x"}, 404),
+    ("DELETE", "/api/v1/providers/page_reader", None, 422),
+    # Keyless reports "always"; a keyed service with no key reports "unconfigured" without
+    # touching the network, so the suite never depends on a third party being reachable.
+    ("POST", "/api/v1/providers/page_reader/test", None, 200),
+    ("POST", "/api/v1/providers/reverb/test", None, 200),
+    ("GET", "/api/v1/research/plan", None, 200),
+    ("GET", "/api/v1/research/queue", None, 200),
+    ("GET", "/api/v1/research/coverage", None, 200),
 ])
 def test_routes_answer_without_server_error(client, method, path, body, expect):
     response = client.request(method, path, json=body)

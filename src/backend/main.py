@@ -76,6 +76,15 @@ from src.backend.services.paths import (
     recover_catalog,
     replace_catalog_with,
 )
+from src.backend.services.providers import (
+    clear_provider_key,
+    configured_provider_ids,
+    get_provider,
+    provider_key,
+    provider_states,
+    save_provider_key,
+)
+from src.backend.services.research_plan import coverage_for, plan_summary
 from src.backend.services.storage import get_storage, invalidate_connections
 from src.backend.services.updater import (
     cached_release,
@@ -1409,6 +1418,172 @@ async def delete_firecrawl_config() -> dict:
     return {"status": "deleted", "api_key_configured": False}
 
 # ----------------------------------------------------------------------
+# Research sources: the services a run can lean on, and the plan it would run
+# ----------------------------------------------------------------------
+
+class ProviderKeyRequest(BaseModel):
+    key: str = Field(default="", max_length=500)
+
+
+def _provider_state(provider_id: str) -> dict:
+    return next(state for state in provider_states() if state["id"] == provider_id)
+
+
+@app.get("/api/v1/providers")
+async def list_providers() -> dict:
+    """Every optional service, what it unlocks, and whether it is configured.
+
+    Never contains a key: the interface only ever needs to know whether one is there.
+    """
+    return {"providers": provider_states()}
+
+
+@app.put("/api/v1/providers/{provider_id}")
+async def set_provider_key(provider_id: str, payload: ProviderKeyRequest) -> dict:
+    """Store a key for one service, locally. It is never sent back out."""
+    provider = get_provider(provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="No such service.")
+    try:
+        save_provider_key(provider_id, payload.key)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if provider_id == "firecrawl":
+        # The Firecrawl client caches its key; a new one has to replace it.
+        reset_firecrawl_service()
+        mcp_server._firecrawl = None
+    return {"provider": _provider_state(provider_id)}
+
+
+@app.delete("/api/v1/providers/{provider_id}")
+async def clear_provider_key_route(provider_id: str) -> dict:
+    """Forget a key."""
+    provider = get_provider(provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="No such service.")
+    try:
+        clear_provider_key(provider_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if provider_id == "firecrawl":
+        reset_firecrawl_service()
+        mcp_server._firecrawl = None
+    return {"provider": _provider_state(provider_id)}
+
+
+@app.post("/api/v1/providers/{provider_id}/test")
+async def test_provider(provider_id: str) -> dict:
+    """Ask the service whether the key works, in one cheap call.
+
+    An honest answer matters more than a green one: a key that is present but refused is worse than no
+    key at all, because a run would fail later and for a reason nobody could see.
+    """
+    provider = get_provider(provider_id)
+    if provider is None:
+        raise HTTPException(status_code=404, detail="No such service.")
+    if provider.keyless:
+        return {"status": "always", "detail": f"{provider.label} needs no key, and is always available."}
+    key = provider_key(provider_id)
+    if not key:
+        return {"status": "unconfigured", "detail": f"Add a {provider.label} key first."}
+    if not provider.test_url:
+        return {
+            "status": "untested",
+            "detail": f"There is no cheap way to test {provider.label}; a run reports what it finds.",
+        }
+
+    headers = {}
+    if provider.test_header:
+        headers[provider.test_header] = f"Bearer {key}" if provider.test_header == "Authorization" else key
+    params = {provider.test_param: key} if provider.test_param else {}
+    url = provider.test_url + (f"?{provider.test_query}" if provider.test_query else "")
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(12.0, connect=5.0)) as client:
+            response = await client.get(url, headers=headers, params=params)
+    except httpx.HTTPError as exc:
+        return {"status": "unreachable", "detail": f"Could not reach {provider.label}: {exc}"}
+    if response.is_success:
+        return {"status": "ok", "detail": f"{provider.label} accepted the key."}
+    if response.status_code in (401, 403):
+        return {"status": "rejected", "detail": f"{provider.label} refused this key."}
+    return {"status": "error", "detail": f"{provider.label} answered HTTP {response.status_code}."}
+
+
+@app.get("/api/v1/research/plan")
+async def research_plan_route(equipment_id: str | None = None, category: str | None = None) -> dict:
+    """What a research run would do, and which steps can run right now.
+
+    A step whose key is missing is returned as `ready: false` rather than being hidden: the plan is
+    also the honest answer to "what am I not getting, and why".
+    """
+    if equipment_id:
+        equipment = get_storage().get_equipment(equipment_id)
+        if not equipment:
+            raise HTTPException(status_code=404, detail="Equipment not found")
+        category = equipment.category
+    plan = plan_summary(category or "Other")
+    configured = configured_provider_ids()
+    for step in plan["steps"]:
+        step["ready"] = step["needs_key"] is None or step["needs_key"] in configured
+    return {"plan": plan}
+
+@app.get("/api/v1/research/queue")
+async def research_queue() -> dict:
+    """Findings a run produced that nobody has looked at yet.
+
+    Nothing a run finds is treated as known until it is approved, which is the same rule the phone
+    capture flow uses for the devices it photographs.
+    """
+    findings = await run_in_threadpool(get_storage().pending_findings)
+    return {"findings": findings, "count": len(findings)}
+
+
+@app.get("/api/v1/research/coverage")
+async def research_coverage() -> dict:
+    """What is known about each device, and what is missing — the matrix, gaps first.
+
+    Only *reviewed* findings count as knowing something; a queue full of unread results is not
+    coverage, and counting it as such would tell somebody their studio was documented when it is not.
+    """
+    storage = get_storage()
+    devices = await run_in_threadpool(storage.list_equipment)
+    rows = []
+    for device in devices:
+        if device.archived:
+            continue
+        findings = await run_in_threadpool(storage.get_research_findings, device.id)
+        covered = {
+            finding["dimension"]
+            for finding in findings
+            if finding.get("dimension") and finding.get("status") == "completed"
+        }
+        has_manual = bool(device.manuals) or bool(
+            await run_in_threadpool(storage.get_manual_document_paths, device.id)
+        )
+        row = coverage_for(device.category, covered=covered, has_manual=has_manual)
+        row.update(
+            {
+                "equipment_id": device.id,
+                "name": device.name,
+                "manufacturer": device.manufacturer,
+                "pending": sum(1 for finding in findings if finding.get("status") == "pending"),
+            }
+        )
+        rows.append(row)
+
+    rows.sort(key=lambda row: (row["complete"], len(row["missing"]) * -1, row["name"].lower()))
+    return {
+        "devices": rows,
+        "totals": {
+            "devices": len(rows),
+            "complete": sum(1 for row in rows if row["complete"]),
+            "missing_manual": sum(1 for row in rows if "manual" in row["missing"]),
+            "pending_findings": sum(row["pending"] for row in rows),
+        },
+    }
+
+
+# ----------------------------------------------------------------------
 # Research Findings Endpoints (linked to equipment)
 # ----------------------------------------------------------------------
 
@@ -1420,6 +1595,9 @@ class ResearchFindingCreate(BaseModel):
     extracted_specs: dict = Field(default_factory=dict)
     confidence: float = Field(default=0.5, ge=0.0, le=1.0)
     status: str = "completed"
+    #: Which column of the coverage matrix this fills; a run's findings set it so the matrix
+    #: can tell what is still missing.
+    dimension: str | None = Field(default=None, max_length=40)
 
 
 @app.get("/api/v1/equipment/{equipment_id}/research-findings")
