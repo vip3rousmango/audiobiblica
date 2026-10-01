@@ -7,6 +7,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.6] - 2026-09-30
+
+### Added
+
+- **A research run is drawn as a tree of data.** The device, the questions asked of it, the sources
+  each answer came from, and the quote or fact it yielded — every subtree collapsed to a count and
+  expanding on demand, with arrow keys to walk it and Enter to open a source. The shape carries the
+  information: which question found nothing, which is waiting on a key, which source answered three
+  of them at once.
+- **A run streams.** Each step appears where it belongs the moment it is produced, over
+  server-sent events, instead of the panel asking every second and a half. A finished run's stream
+  says so and closes. The old list view stays behind a toggle, for reading a run rather than seeing
+  its shape.
+
 ### Fixed
 
 - **OpenAI and Anthropic claimed to be ready when they were not.** They take their key from
@@ -188,7 +204,8 @@ First public release.
 
 - The dead `audiobiblica` console-script entry point.
 
-[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.4
 [0.1.3]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.3
