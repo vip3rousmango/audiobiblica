@@ -11,7 +11,9 @@ steps would make the app useless to somebody who brought no keys.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
+import pathlib
 
 import pytest
 
@@ -499,3 +501,67 @@ def test_a_run_streams_its_steps_and_closes(client, monkeypatch):
     with client.stream("GET", f"/api/v1/research/runs/{started['id']}/stream") as again:
         body = "".join(again.iter_text())
     assert body.count("data: ") == 2 and '"type": "finished"' in body
+
+
+def test_the_template_source_answers_a_step_about_ports(monkeypatch):
+    """The keyless source every port question leans on, exercised directly.
+
+    It was broken on every category for a full release because the handler shadowed the catalogue
+    fetcher and called itself with no arguments — a TypeError recorded as a failed step, which no
+    unit test looked at because they all stood in for the whole dispatcher.
+    """
+    from src.backend.services import research_run as runner
+    from src.backend.services.storage import Storage
+
+    catalogue = [
+        {
+            "id": "tpl-1", "label": "ISA ONE", "manufacturer": "Focusrite", "deviceType": "preamp",
+            "ports": [
+                {"id": "p1", "label": "Mic in", "signalType": "audio", "direction": "input", "connectorType": "xlr"},
+                {"id": "p2", "label": "Line out", "signalType": "audio", "direction": "output", "connectorType": "trs"},
+            ],
+        }
+    ]
+    monkeypatch.setattr(runner, "_template_catalogue", lambda: catalogue)
+    monkeypatch.setattr(runner, "_templates_path", lambda: pathlib.Path("/nonexistent"))
+
+    storage = Storage()
+    device = _device("tpl-1", "Outboard")
+    device.model = "ISA ONE"
+    device.manufacturer = "Focusrite"
+    storage.create_equipment(device)
+    step = {"step_id": "gain_range", "title": "Gain and range", "tool": "easyschematic_templates", "dimension": "specs"}
+
+    async def scenario():
+        return await runner._templates(storage, device, step, ["gain"])
+
+    result = asyncio.run(scenario())
+    assert result.state == "done", f"a matching template is an answer: {result.detail}"
+    assert "2 ports" in result.evidence[0]["snippet"]
+    assert "xlr" in result.evidence[0]["snippet"] and "trs" in result.evidence[0]["snippet"]
+
+    # A device the catalogue has never heard of says so, rather than failing or inventing one.
+    stranger = _device("tpl-2", "Outboard")
+    stranger.model = "Nobody Makes This"
+    stranger.name = "Nobody Makes This"
+    result = asyncio.run(runner._templates(storage, stranger, step, ["gain"]))
+    assert result.state == "empty"
+
+    # An empty catalogue is a fact: nothing matches. A catalogue that was never fetched is not a
+    # fact, and must not be reported as "no template matches" about something we never saw.
+    monkeypatch.setattr(runner, "_template_catalogue", lambda: [])
+    assert asyncio.run(runner._templates(storage, device, step, ["gain"])).state == "empty"
+
+    monkeypatch.setattr(runner, "_template_catalogue", lambda: None)
+    unreachable = asyncio.run(runner._templates(storage, device, step, ["gain"]))
+    assert unreachable.state == "failed"
+    assert "could not be fetched" in unreachable.detail
+
+
+def test_the_catalogue_fetcher_is_not_the_step_handler():
+    """Two functions, two names. They shared one, and the source was dead for a release."""
+    from src.backend.services import research_run as runner
+
+    assert runner._template_catalogue is not runner._templates
+    assert len(inspect.signature(runner._templates).parameters) == 4
+    assert len(inspect.signature(runner._template_catalogue).parameters) == 0

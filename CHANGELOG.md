@@ -7,7 +7,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The EasySchematic template source failed on every step it served.** Port, connector, clock and
+  polar-pattern questions are answered from its catalogue, and the step handler shadowed the
+  catalogue fetcher of the same name, so it called itself with no arguments and recorded a `TypeError`
+  as the step's error — visible in the panel as a stack trace rather than an answer. Found by reading
+  a run's own detail on the published image.
+- A catalogue that **could not be fetched** no longer reports itself as "no template matches this
+  device": an empty catalogue is a fact, an unreachable one is not, and only one of those justifies
+  saying nothing was found.
 
 ## [0.1.6] - 2026-09-30
 

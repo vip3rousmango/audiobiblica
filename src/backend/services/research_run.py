@@ -64,11 +64,12 @@ def _templates_path() -> Path:
     return data_dir() / "easyschematic-templates.json"
 
 
-def _templates() -> list[dict]:
-    """EasySchematic's device catalogue, from disk when it is fresh enough.
+def _template_catalogue() -> Optional[list[dict]]:
+    """EasySchematic's device catalogue, or ``None`` when it could not be fetched at all.
 
-    Never raises: a machine that is offline, or a catalogue that changed shape, leaves the step
-    without an answer rather than failing the run.
+    Never raises. The difference between ``[]`` and ``None`` is the difference between "there is
+    nothing in the catalogue" and "I never saw it", and only one of those justifies telling somebody
+    that nothing matches their device.
     """
     path = _templates_path()
     try:
@@ -85,9 +86,9 @@ def _templates() -> list[dict]:
         payload = response.json()
     except (httpx.HTTPError, ValueError) as exc:
         logger.info("Could not fetch the device templates: %s", exc)
-        return []
+        return None
     if not isinstance(payload, list):
-        return []
+        return None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload), encoding="utf-8")
@@ -210,12 +211,21 @@ async def _page_reader(storage, equipment, step, words: list[str]) -> StepResult
 
 async def _templates(storage, equipment, step, words: list[str]) -> StepResult:
     """EasySchematic's device catalogue: real port and connector definitions, no key needed."""
+    catalogue = await run_in_threadpool(_template_catalogue)
+    if catalogue is None:
+        return StepResult(
+            "failed",
+            "The EasySchematic catalogue could not be fetched.",
+            [],
+            "No answer from api.easyschematic.live — the step will work once it is reachable.",
+        )
+
     wanted = {device_key(equipment.name, equipment.manufacturer, equipment.model or "")}
     if equipment.model:
         wanted.add(device_key(equipment.model, equipment.manufacturer, None))
     wanted.discard("")
 
-    for template in await run_in_threadpool(_templates):
+    for template in catalogue:
         if not isinstance(template, dict):
             continue
         keys = {
