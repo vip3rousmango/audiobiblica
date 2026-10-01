@@ -3,6 +3,7 @@ import { AssistantConfig, clearAssistantCredential, createBackup, DataStatus, ge
 import { Icon } from '../components/Icon';
 import MobileCapture from '../components/MobileCapture';
 import ResearchSources from '../components/ResearchSources';
+import ServiceInfo from '../components/ServiceInfo';
 import SetupDoctor, { SettingsSection } from '../components/SetupDoctor';
 import { Button, InlineNotice, PageHeader, StatusDot } from '../components/ui';
 
@@ -416,6 +417,7 @@ const Settings: React.FC = () => {
     { id: 'sources', label: 'Research sources', icon: 'research' as const },
     { id: 'mobile', label: 'Mobile capture', icon: 'camera' as const },
     { id: 'doctor', label: 'Check my setup', icon: 'activity' as const },
+    { id: 'service', label: 'Service information', icon: 'server' as const },
   ] as const;
 
   const [activeSection, setActiveSection] = useState<SettingsSection>(sections[0].id);
@@ -520,6 +522,7 @@ const Settings: React.FC = () => {
           </section>}
           {activeSection === 'sources' && <ResearchSources onToast={showToast} />}
           {activeSection === 'mobile' && <MobileCapture onToast={showToast} />}
+          {activeSection === 'service' && <ServiceInfo onToast={showToast} />}
           {activeSection === 'doctor' && (
             <SetupDoctor onRestore={restoreSnapshot} onOpenSection={setActiveSection} onToast={showToast} />
           )}

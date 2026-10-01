@@ -8,6 +8,7 @@ import io
 import json
 import logging
 import os
+import platform
 import secrets
 import sqlite3
 import uuid
@@ -66,11 +67,13 @@ from src.backend.services.page_reader import read_page
 from src.backend.services.paths import (
     backup_created_at,
     backup_database,
+    backups_dir,
     catalog_state,
     configure_logging,
     data_dir,
     database_path,
     list_backups,
+    log_path,
     manuals_dir,
     migrate_legacy_database,
     photos_dir,
@@ -91,6 +94,7 @@ from src.backend.services.storage import get_storage, invalidate_connections
 from src.backend.services.updater import (
     cached_release,
     latest_release,
+    read_updater_status,
     request_update,
     update_status_payload,
 )
@@ -1988,6 +1992,134 @@ async def diagnostics() -> dict:
     return await run_in_threadpool(
         collect_diagnostics, _catalog_recovery, assistant, _catalog_counts(storage), update
     )
+
+@app.get("/api/v1/service/info")
+async def service_info() -> dict:
+    """Where everything is, and what is running — one screen for "am I set up right?".
+
+    Written for the question a musician actually asks ("which address do I open on my phone?",
+    "where did my manuals go?"), and for support, where the first three replies are always the
+    version, the data directory and whether the pieces are talking to each other. Never fails:
+    a piece that cannot be reached says so rather than returning an error.
+    """
+    settings = _assistant_settings()
+    storage = get_storage()
+    ui_dir = Path(os.getenv("AUDIOBIBLICA_UI_DIR")) if os.getenv("AUDIOBIBLICA_UI_DIR") else None
+    mounted_ui = ui_dir is not None and (ui_dir / "index.html").is_file()
+
+    # One probe, used twice: asking the local runtime costs a request, and this screen should open
+    # instantly even on a busy machine.
+    readers = await _local_models(settings) or []
+    assistant_ready = bool(settings["model"]) and (settings["provider"] != "Local" or bool(readers))
+    vision = vision_model()
+    latest = cached_release()
+    updater = read_updater_status()
+
+    def service(service_id: str, label: str, status: str, detail: str, url: str | None = None) -> dict:
+        return {"id": service_id, "label": label, "status": status, "detail": detail, "url": url}
+
+    services = [
+        service("app", "AudioBiblica", "running", f"version {APP_VERSION}"),
+        service(
+            "interface",
+            "Built interface",
+            "served" if mounted_ui else "api-only",
+            str(ui_dir) if mounted_ui else "No interface is mounted: this is the API only",
+            f"http://localhost:{mobile_port()}",
+        ),
+        service(
+            "assistant",
+            "Assistant",
+            "ready" if assistant_ready else "not-ready",
+            f"{settings['provider']} · {settings['model']}" if assistant_ready else "Not reachable or no model chosen",
+            settings["local_base_url"] if settings["provider"] == "Local" else None,
+        ),
+        service(
+            "photo_reader",
+            "Photo reader",
+            "ready" if vision in readers else "missing",
+            vision if vision in readers else f"{vision} is not installed",
+        ),
+        service(
+            "mcp",
+            "MCP server",
+            "ready",
+            "Tools for other agents on this computer",
+            f"http://localhost:{mobile_port()}/mcp",
+        ),
+        service(
+            "updater",
+            "Self-update",
+            "running" if updater else "absent",
+            (
+                f"newest release {latest['version']}" if latest else "no release information yet"
+            ) if updater else "The updater container is not running",
+        ),
+        service(
+            "research_sources",
+            "Research sources",
+            "ready" if len(configured_provider_ids()) > 4 else "limited",
+            f"{len(configured_provider_ids())} of {len(provider_states())} configured",
+        ),
+    ]
+
+    # EasySchematic, if this computer already runs one: port 8080 when it is the copy the studio
+    # console bundles, anything the user started otherwise. `host.docker.internal` is in the list
+    # because this app is usually the one in a container — and inside one, "localhost" is not the
+    # machine the schematic is running on. That is how the first version of this probe reported a
+    # running EasySchematic as absent.
+    easyschematic = None
+    for candidate in (
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://host.docker.internal:8080",
+    ):
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(2.0, connect=1.0)) as client:
+                response = await client.get(candidate)
+            if response.is_success:
+                easyschematic = candidate
+                break
+        except httpx.HTTPError:
+            continue
+    services.append(
+        service(
+            "easyschematic",
+            "EasySchematic",
+            "found" if easyschematic else "not-found",
+            easyschematic or "No schematic app answered on this computer",
+            easyschematic,
+        )
+    )
+
+    return {
+        "app": {
+            "version": APP_VERSION,
+            "python": platform.python_version(),
+            "platform": platform.platform(),
+            "running_in_container": in_container(),
+        },
+        "paths": {
+            "data_dir": str(data_dir()),
+            "database_path": str(database_path()),
+            "manuals_dir": str(manuals_dir()),
+            "photos_dir": str(photos_dir()),
+            "log_path": str(log_path()),
+            "backups_dir": str(backups_dir()),
+            "interface_dir": str(ui_dir) if ui_dir else None,
+        },
+        "network": {
+            "lan_address": lan_address(),
+            "address_source": "override" if lan_address_override() else "guessed",
+            "port": mobile_port(),
+            "capture_url": capture_url(),
+            "open_here": f"http://localhost:{mobile_port()}",
+        },
+        "counts": {
+            "equipment": len(await run_in_threadpool(storage.list_equipment)),
+        },
+        "services": services,
+    }
 
 
 

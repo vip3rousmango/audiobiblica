@@ -221,6 +221,19 @@ const ResearchAgent: React.FC = () => {
   }, [queue]);
 
   const totals = coverage?.totals ?? {};
+  const devices = totals.devices ?? 0;
+
+  /* Counted, then said properly: "1 need a key" is not a sentence. */
+  const needsKey = plan?.steps.filter((step) => step.ready === false).length ?? 0;
+  /* "a Interface" is the kind of thing that makes a musician trust the rest of it less. */
+  const category = selected?.category ?? 'device';
+  const article = /^[aeiou]/i.test(category) ? 'an' : 'a';
+  const planHeadline = plan
+    ? `${plan.steps.length} steps for ${article} ${category}${
+        needsKey === 0 ? ' — everything it needs is set up.'
+        : needsKey === 1 ? ' — one of them needs a key.'
+        : ` — ${needsKey} of them need keys.`}`
+    : '';
 
   return (
     <>
@@ -236,7 +249,9 @@ const ResearchAgent: React.FC = () => {
         <div className="surface-body">
           <div className="library-toolbar">
             <div className="research-summary" aria-label="What is known across the catalog">
-              <span className="batch-count">{totals.devices ?? 0} devices</span>
+              <span className="batch-count">
+                {devices} device{devices === 1 ? '' : 's'}
+              </span>
               <StatusDot tone="success" label={`${totals.complete ?? 0} fully documented`} />
               <StatusDot tone="warning" label={`${totals.missing_manual ?? 0} missing a manual`} />
               <StatusDot tone="neutral" label={`${totals.pending_findings ?? 0} waiting to be reviewed`} />
@@ -269,9 +284,7 @@ const ResearchAgent: React.FC = () => {
               <div>
                 <h2>{run ? `Run for ${selected?.name ?? 'this device'}` : 'The plan'}</h2>
                 <p>
-                  {run?.summary
-                    ? run.summary
-                    : `${totalSteps} steps for a ${selected?.category ?? 'device'} — ${plan?.steps.filter((step) => step.ready === false).length ?? 0} need a key.`}
+                  {run?.summary ? run.summary : planHeadline}
                 </p>
               </div>
             </div>

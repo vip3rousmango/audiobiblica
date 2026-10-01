@@ -4,7 +4,7 @@ import { useUpdateRunner } from '../lib/useUpdate';
 import { Icon } from '../components/Icon';
 import { Button, InlineNotice, StatusDot } from '../components/ui';
 
-export type SettingsSection = 'assistant' | 'web-search' | 'advanced' | 'your-data' | 'sources' | 'mobile' | 'doctor';
+export type SettingsSection = 'assistant' | 'web-search' | 'advanced' | 'your-data' | 'sources' | 'mobile' | 'doctor' | 'service';
 
 const TONES: Record<Diagnostics['checks'][number]['level'], 'success' | 'warning' | 'danger'> = {
   ok: 'success',

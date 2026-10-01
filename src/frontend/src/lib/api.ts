@@ -139,6 +139,25 @@ export interface ResearchRun {
   steps?: ResearchStepState[];
 }
 
+export interface ServiceStatus {
+  id: string;
+  label: string;
+  status: string;
+  detail: string;
+  url: string | null;
+}
+
+export interface ServiceInfo {
+  app: { version: string; python: string; platform: string; running_in_container: boolean };
+  paths: {
+    data_dir: string; database_path: string; manuals_dir: string; photos_dir: string;
+    log_path: string; backups_dir: string; interface_dir: string | null;
+  };
+  network: { lan_address: string | null; address_source: 'override' | 'guessed'; port: number; capture_url: string | null; open_here: string };
+  counts: { equipment: number };
+  services: ServiceStatus[];
+}
+
 export interface CoverageRow {
   equipment_id: string;
   name: string;
@@ -789,6 +808,12 @@ export async function approveFindings(ids: string[]): Promise<{ approved: number
 
 export async function getResearchCoverage(): Promise<{ devices: CoverageRow[]; totals: Record<string, number> }> {
   return request('/api/v1/research/coverage');
+}
+
+/* Where everything is and what is running: the screen that answers "which address do I open on my
+   phone" and the first three questions support always asks. */
+export async function getServiceInfo(): Promise<ServiceInfo> {
+  return request<ServiceInfo>('/api/v1/service/info');
 }
 
 export function getApiBaseUrl(): string {
