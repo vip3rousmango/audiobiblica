@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AssistantConfig, clearAssistantCredential, createBackup, DataStatus, getApiBaseUrl, getAssistantConfig, getDataStatus, getMcpStatus, getSetupStatus, importCatalog, listAssistantModels, pullModel, restoreBackup, saveAssistantConfig, testAssistantConnection } from '../lib/api';
 import { Icon } from '../components/Icon';
 import MobileCapture from '../components/MobileCapture';
+import ResearchSources from '../components/ResearchSources';
 import SetupDoctor, { SettingsSection } from '../components/SetupDoctor';
 import { Button, InlineNotice, PageHeader, StatusDot } from '../components/ui';
 
@@ -412,6 +413,7 @@ const Settings: React.FC = () => {
     { id: 'web-search', label: 'Web search (optional)', icon: 'globe' as const },
     { id: 'advanced', label: 'Advanced', icon: 'server' as const },
     { id: 'your-data', label: 'Your data', icon: 'database' as const },
+    { id: 'sources', label: 'Research sources', icon: 'research' as const },
     { id: 'mobile', label: 'Mobile capture', icon: 'camera' as const },
     { id: 'doctor', label: 'Check my setup', icon: 'activity' as const },
   ] as const;
@@ -516,6 +518,7 @@ const Settings: React.FC = () => {
               <Button size="sm" variant="secondary" icon="package" disabled={dataBusy} onClick={() => void backupNow()}>Back up now</Button>
             </div>
           </section>}
+          {activeSection === 'sources' && <ResearchSources onToast={showToast} />}
           {activeSection === 'mobile' && <MobileCapture onToast={showToast} />}
           {activeSection === 'doctor' && (
             <SetupDoctor onRestore={restoreSnapshot} onOpenSection={setActiveSection} onToast={showToast} />

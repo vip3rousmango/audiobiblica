@@ -10,6 +10,8 @@ steps would make the app useless to somebody who brought no keys.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from src.backend.services.gear_scan import CATEGORIES
@@ -209,21 +211,31 @@ def test_a_finding_remembers_which_dimension_it_fills():
     storage.create_equipment(_device("run-store-4", "Interface"))
     storage.add_research_finding(
         "run-store-4",
-        {"id": "f-dim", "title": "Clock", "source_url": "https://example.com/clock", "dimension": "connections"},
+        {"id": "f-dim", "query": "Clock", "title": "Clock", "source_url": "https://example.com/clock", "dimension": "connections"},
     )
     stored = next(f for f in storage.get_research_findings("run-store-4") if f["id"] == "f-dim")
     assert stored["dimension"] == "connections"
 
-    # Finding the same source again updates the existing row rather than adding another — the
-    # branch a second run over the same device takes, and the one this change edited.
+    # The same question asked of the same source again updates that row — the branch a second run
+    # over one device takes.
     storage.add_research_finding(
         "run-store-4",
-        {"id": "ignored", "title": "Clock again", "source_url": "https://example.com/clock", "dimension": "settings"},
+        {"id": "ignored", "query": "Clock", "title": "Clock again", "source_url": "https://example.com/clock", "dimension": "connections"},
     )
     updated = next(f for f in storage.get_research_findings("run-store-4") if f["id"] == "f-dim")
     assert updated["title"] == "Clock again"
-    assert updated["dimension"] == "settings"
-    assert len(storage.get_research_findings("run-store-4")) == 1, "the same source is not stored twice"
+    assert len(storage.get_research_findings("run-store-4")) == 1, "the same question from the same source is one finding"
+
+    # A *different* question answered from the same source is its own finding. Matching on the
+    # source alone collapsed two of them into one, which cost a coverage dimension: found by
+    # running a plan whose manual answered both "Gain and range" and "Phantom power".
+    storage.add_research_finding(
+        "run-store-4",
+        {"id": "f-second", "query": "Sample rate", "title": "Sample rate", "source_url": "https://example.com/clock", "dimension": "specs"},
+    )
+    both = storage.get_research_findings("run-store-4")
+    assert len(both) == 2, "one source can answer several questions"
+    assert {finding["dimension"] for finding in both} == {"connections", "specs"}
 
 
 def test_pending_work_does_not_count_as_knowing_something():
@@ -288,3 +300,119 @@ def test_coverage_and_queue_answer_for_a_real_device(client):
     assert "specs" not in row["covered"], "a pending finding is not knowledge yet"
     assert row["pending"] == 1
     assert row["complete"] is False
+
+
+# --- the executor ------------------------------------------------------------
+
+def test_a_run_with_no_keys_still_asks_every_question(monkeypatch, tmp_path):
+    async def scenario():
+        """The local-first baseline, end to end: steps run, keyed ones say so, the run finishes.
+
+        `read_page` and the templates are stood in for — this is about what the run *does*, not about
+        what the network answers.
+        """
+        from src.backend.services import research_run as runner
+        from src.backend.services.page_reader import PageRead
+        from src.backend.services.storage import Storage
+
+        monkeypatch.setattr(runner, "_templates", lambda: [])
+        monkeypatch.setattr(runner, "read_page", lambda url: PageRead(url=url, error="not read"))
+
+        storage = Storage()
+        device = _device("exec-1", "Microphone")
+        storage.create_equipment(device)
+        storage.create_research_run("exec-run-1", "exec-1", plan_summary("Microphone")["steps"])
+
+        outcome = await runner.run_plan(storage, "exec-run-1", device)
+
+        run = storage.get_research_run("exec-run-1")
+        assert run is not None
+        assert outcome["counts"]["found"] == 0, "nothing was available to find"
+        assert outcome["counts"]["needs_key"] >= 1, "the keyed steps report themselves as unconfigured"
+        assert all(step["state"] in {"done", "empty", "needs-key", "failed"} for step in run["steps"])
+        assert run["status"] == "finished"
+        assert run["summary"], "a run says what happened in a sentence"
+        assert any(step["state"] == "needs-key" for step in run["steps"])
+
+    asyncio.run(scenario())
+
+def test_what_a_step_finds_becomes_a_pending_finding(monkeypatch):
+    async def scenario():
+        """Evidence is proposed, never asserted: the queue is the only way in."""
+        from src.backend.services import research_run as runner
+        from src.backend.services.storage import Storage
+
+        storage = Storage()
+        device = _device("exec-2", "Monitor")
+        storage.create_equipment(device)
+        storage.create_research_run("exec-run-2", "exec-2", plan_summary("Monitor")["steps"])
+
+        async def fake_tool(storage_, equipment, step):
+            if step["step_id"] != "drivers":
+                return runner.StepResult("empty", "nothing here", [])
+            return runner.StepResult(
+                "done",
+                "Matched a template.",
+                [{"title": "KRK Rokit", "url": "https://example.com/krk", "snippet": "6 inch woofer", "provider": "easyschematic_templates"}],
+            )
+
+        monkeypatch.setattr(runner, "_run_step", fake_tool)
+        await runner.run_plan(storage, "exec-run-2", device)
+
+        findings = [f for f in storage.get_research_findings("exec-2") if f["status"] == "pending"]
+        assert len(findings) == 1, "one finding per question that found something"
+        finding = findings[0]
+        assert finding["title"] == "Driver complement"
+        assert finding["dimension"] == "specs"
+        assert finding["source_url"] == "https://example.com/krk"
+        assert "6 inch woofer" in finding["content"]
+
+        row = next(item for item in coverage_for("Monitor", covered=set(), has_manual=False)["missing"])
+        assert row, "pending findings do not count as coverage"
+        assert "specs" in coverage_for("Monitor", covered={"specs"}, has_manual=False)["covered"]
+
+    asyncio.run(scenario())
+
+def test_a_step_that_throws_does_not_take_the_run_with_it(monkeypatch):
+    async def scenario():
+        """One broken tool must not lose the other answers."""
+        from src.backend.services import research_run as runner
+        from src.backend.services.storage import Storage
+
+        storage = Storage()
+        device = _device("exec-3", "Interface")
+        storage.create_equipment(device)
+        storage.create_research_run("exec-run-3", "exec-3", plan_summary("Interface")["steps"])
+
+        async def exploding_tool(storage_, equipment, step):
+            raise RuntimeError("the tool fell over")
+
+        monkeypatch.setattr(runner, "_run_step", exploding_tool)
+        outcome = await runner.run_plan(storage, "exec-run-3", device)
+
+        run = storage.get_research_run("exec-run-3")
+        assert outcome["counts"]["failed"] == len(run["steps"])
+        assert run["status"] == "finished-with-errors"
+        assert all(step["state"] == "failed" and step["error"] for step in run["steps"])
+        assert all("could not be completed" in step["detail"] for step in run["steps"])
+
+    asyncio.run(scenario())
+
+def test_the_keywords_a_step_looks_for_come_from_its_title():
+    """`Polar pattern` must not become a one-word search, and short words are noise."""
+    from src.backend.services.research_run import _keywords
+
+    assert _keywords("Polar pattern") == ["polar", "pattern"]
+    assert _keywords("Clock") == ["clock"], "a short single word still has to be a keyword"
+    assert "of" not in _keywords("Recall sheet of the device")
+
+
+def test_an_excerpt_is_a_window_around_the_mention_not_the_whole_page():
+    """A finding should quote what it rests on, not paste 18 000 characters into the drawer."""
+    from src.backend.services.research_run import _excerpt
+
+    text = "Intro. " * 200 + "The phantom power is switchable per channel. " + "Outro. " * 200
+    excerpt = _excerpt(text, ["phantom"])
+    assert excerpt is not None and "switchable per channel" in excerpt
+    assert len(excerpt) < 400, "an excerpt is a sentence-sized window"
+    assert _excerpt("nothing relevant here", ["phantom"]) is None

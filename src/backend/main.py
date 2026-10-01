@@ -85,6 +85,7 @@ from src.backend.services.providers import (
     save_provider_key,
 )
 from src.backend.services.research_plan import coverage_for, plan_summary
+from src.backend.services.research_run import run_plan
 from src.backend.services.storage import get_storage, invalidate_connections
 from src.backend.services.updater import (
     cached_release,
@@ -1581,6 +1582,84 @@ async def research_coverage() -> dict:
             "pending_findings": sum(row["pending"] for row in rows),
         },
     }
+
+#: Runs in flight. Held so the event loop keeps a reference to them; the run's own state
+#: lives in the catalog, so a restarted server simply has no task and a run that reads as
+#: unfinished. Same shape as the model download.
+_research_tasks: set[asyncio.Task] = set()
+
+
+class ResearchRunRequest(BaseModel):
+    #: "planned" walks the category's scaffold. "open" hands the device to nanobot, which is
+    #: documented and host-installed rather than bundled — the button exists so the reason it
+    #: cannot run yet is visible instead of absent.
+    mode: Literal["planned", "open"] = "planned"
+
+
+@app.post("/api/v1/equipment/{equipment_id}/research/run")
+async def start_research_run(equipment_id: str, payload: ResearchRunRequest | None = None) -> dict:
+    """Start a research run. Returns at once; the run is watched, never awaited."""
+    storage = get_storage()
+    equipment = storage.get_equipment(equipment_id)
+    if not equipment:
+        raise HTTPException(status_code=404, detail="Equipment not found")
+    mode = payload.mode if payload else "planned"
+    if mode == "open":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "An open run is driven by nanobot, which is installed on this computer rather than "
+                "bundled with the app. Start it, connect its MCP tools to AudioBiblica, and try again."
+            ),
+        )
+
+    run_id = str(uuid.uuid4())
+    steps = plan_summary(equipment.category)["steps"]
+    await run_in_threadpool(storage.create_research_run, run_id, equipment_id, steps, mode)
+    task = asyncio.create_task(run_plan(storage, run_id, equipment, mode))
+    _research_tasks.add(task)
+    task.add_done_callback(_research_tasks.discard)
+    return {"run": await run_in_threadpool(storage.get_research_run, run_id)}
+
+
+@app.get("/api/v1/research/runs")
+async def list_research_runs() -> dict:
+    """Recent runs, newest first, each named after the device it was about."""
+    storage = get_storage()
+    runs = await run_in_threadpool(storage.list_research_runs)
+    names = {item.id: item.name for item in await run_in_threadpool(storage.list_equipment)}
+    for run in runs:
+        run["equipment_name"] = names.get(run["equipment_id"])
+        run["equipment_missing"] = run["equipment_id"] not in names
+    return {"runs": runs}
+
+
+@app.get("/api/v1/research/runs/{run_id}")
+async def get_research_run(run_id: str) -> dict:
+    """One run: its steps, what each found, and why it did not."""
+    run = await run_in_threadpool(get_storage().get_research_run, run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="No such research run.")
+    return {"run": run}
+
+
+class ApproveRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list, max_length=200)
+
+
+@app.post("/api/v1/research/queue/approve")
+async def approve_findings(payload: ApproveRequest) -> dict:
+    """Confirm what a run found, so it starts counting towards what is known.
+
+    Approving is the only thing that turns a queued result into knowledge — the coverage
+    matrix counts reviewed findings alone.
+    """
+    storage = get_storage()
+    approved = 0
+    for finding_id in dict.fromkeys(payload.ids):
+        if await run_in_threadpool(storage.set_finding_status, finding_id, "completed"):
+            approved += 1
+    return {"approved": approved, "requested": len(payload.ids)}
 
 
 # ----------------------------------------------------------------------

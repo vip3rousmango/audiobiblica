@@ -98,9 +98,11 @@ Three promises constrain almost every change. Read them before designing somethi
 | `src/backend/services/mobile.py` | Pairing token, loopback test, LAN address, capture URL, allowed origins |
 | `src/backend/services/providers.py` | The registry of optional research services: which exist, what each unlocks, where its key lives, and how to test it. Keys are never read back out of it for display. |
 | `src/backend/services/research_plan.py` | What "research this device" means per category — steps, the tool that serves each, and the key it needs. Every step's tool must exist and every plan keeps a keyless subset; both are tested. |
+| `src/backend/services/research_run.py` | The executor: a tool per step, every outcome recorded (found / empty / needs-key / failed), evidence turned into **pending** findings. Blocking work goes through `run_in_threadpool`. |
+| `src/backend/services/search_sources.py` | The keyed services — Brave, Discogs, YouTube, Reverb — as request builders plus parsers that are strict about the whole answer and forgiving about one bad item. Errors are sentences, never exceptions. |
 | `src/backend/mcp/` | MCP tool dispatch and the FastMCP Streamable HTTP app |
 | `src/frontend/src/lib/` | `api.ts` (the single typed client + `friendlyMessage`), `photo.ts` (browser-side downscale before upload), `useUpdate.ts` |
-| `src/frontend/src/components/` | `ui.tsx` primitives, `Layout.tsx`, `SetupChecklist.tsx`, `SetupDoctor.tsx`, `UpdateNotice.tsx`, `NanobotChat.tsx`, `MobileCapture.tsx` |
+| `src/frontend/src/components/` | `ui.tsx` primitives, `Layout.tsx`, `SetupChecklist.tsx`, `SetupDoctor.tsx`, `UpdateNotice.tsx`, `NanobotChat.tsx`, `MobileCapture.tsx`, `ResearchSources.tsx` |
 | `src/frontend/src/pages/` | `Dashboard`, `Library`, `ResearchAgent`, `Mcp`, `Settings`, and `Capture` (the phone-only page, rendered outside the desktop shell) |
 | `src/frontend/src/styles.css` | All styling: design tokens as CSS custom properties, kebab-case classes |
 | `tests/` | `conftest.py` (shared client), `test_api_smoke.py`, `test_updater.py` |

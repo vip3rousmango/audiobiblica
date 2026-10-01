@@ -259,6 +259,33 @@ key" instead of returning an empty result. If you build anything on the plan, ho
 The `dimension` values (`manual`, `specs`, `connections`, `sources`, `settings`, `compatibility`) are
 what the coverage matrix counts.
 
+#### Running a plan
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/equipment/{id}/research/run` | `{ "mode": "planned" }` — returns **at once** with the run, whose steps are all `queued`. Watch it, don't await it. |
+| `GET` | `/api/v1/research/runs` | Recent runs, newest first, each named after its device (`equipment_missing` is true when that device has been deleted). |
+| `GET` | `/api/v1/research/runs/{id}` | One run: every step with `state`, `detail`, `error`, `evidence[]` and timings. |
+| `GET` | `/api/v1/research/queue` | Findings a run produced that nobody has reviewed, with the device named. |
+| `POST` | `/api/v1/research/queue/approve` | `{ "ids": [...] }` → `{ approved, requested }`. The only thing that turns a result into knowledge. |
+
+**Step states are the point:** `done` (found something, with `evidence`), `empty` (ran, and the source
+does not mention it — `detail` says so in a sentence), `needs-key` (the step's provider is not
+configured), `failed` (with `error`). A step is never silently blank. `mode: "open"` is rejected with
+`422` and a sentence explaining that it is driven by a nanobot installed on the machine rather than
+shipped in the app.
+
+Findings arrive as `status: "pending"` and only count towards coverage once approved — so a caller can
+poll the queue and build a review UI, or approve in bulk and watch the matrix move.
+
+#### What is missing
+
+`GET /api/v1/research/coverage` returns every device against the dimensions its category asks about,
+gaps first, with totals (`devices`, `complete`, `missing_manual`, `pending_findings`). That is the
+endpoint to call if you want to show "this studio has 12 devices and 7 missing connector specs" — and
+the shape your console can render directly in its DiagnosticsView, since `missing[]` names the same
+dimensions the findings carry.
+
 ---
 
 ## 5. Joining a catalog record to a studio gear item

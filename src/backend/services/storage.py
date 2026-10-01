@@ -611,13 +611,17 @@ class Storage:
                 raise ValueError("Equipment not found")
             existing = None
             if finding.get("source_url"):
+                # A finding is one *answer to one question from one source*. Matching on the
+                # source alone collapses two questions asked of the same manual into one row —
+                # which is how "Gain and range" and "Phantom power" became a single finding, and
+                # how a coverage matrix loses a dimension it was actually told about.
                 existing = conn.execute(
                     """
                     SELECT id, created_at FROM research_findings
-                    WHERE equipment_id = ? AND source_url = ?
+                    WHERE equipment_id = ? AND source_url = ? AND query = ?
                     ORDER BY created_at DESC LIMIT 1
                     """,
-                    (equipment_id, finding["source_url"]),
+                    (equipment_id, finding["source_url"], finding.get("query", "")),
                 ).fetchone()
             if existing:
                 finding_id = existing["id"]

@@ -72,7 +72,85 @@ export interface ResearchFinding {
   extracted_specs: Record<string, unknown>;
   confidence: number;
   status: string;
+  /* Which column of the coverage matrix this fills; null for findings written before that existed. */
+  dimension?: string | null;
+  /* Present in the review queue, which names the device so it can be reviewed out of context. */
+  equipment_name?: string;
+  equipment_manufacturer?: string;
   created_at: string;
+}
+
+/* --- Research: sources, plans, runs, and the queue ------------------------- */
+
+export interface ResearchProvider {
+  id: string;
+  label: string;
+  /** One sentence: what the app can do once this is configured. */
+  unlocks: string;
+  keyless: boolean;
+  configured: boolean;
+  /** Whether this is somewhere to paste a key, as opposed to borrowing one. */
+  key_here: boolean;
+  borrowed_from: string | null;
+  docs: string | null;
+  testable: boolean;
+}
+
+export interface ResearchStep {
+  id: string;
+  title: string;
+  tool: string;
+  question: string;
+  dimension: string;
+  needs_key: string | null;
+  /** False when this step's key is missing — the plan is also the honest answer to what is not possible. */
+  ready?: boolean;
+}
+
+export interface ResearchPlan {
+  category: string;
+  steps: ResearchStep[];
+  dimensions: string[];
+}
+
+export interface ResearchStepState {
+  step_id: string;
+  title: string;
+  tool: string;
+  dimension: string;
+  needs_key: string | null;
+  state: 'queued' | 'running' | 'done' | 'empty' | 'needs-key' | 'failed';
+  detail: string | null;
+  error: string | null;
+  evidence: Array<{ title?: string; url?: string; snippet?: string; provider?: string }>;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface ResearchRun {
+  id: string;
+  equipment_id: string;
+  equipment_name?: string | null;
+  mode: string;
+  status: string;
+  summary: string | null;
+  created_at: string;
+  finished_at: string | null;
+  steps?: ResearchStepState[];
+}
+
+export interface CoverageRow {
+  equipment_id: string;
+  name: string;
+  manufacturer: string;
+  category: string;
+  dimensions: string[];
+  covered: string[];
+  missing: string[];
+  complete: boolean;
+  steps: number;
+  steps_remaining: number;
+  pending: number;
 }
 
 export interface HealthResponse {
@@ -647,6 +725,70 @@ export async function deleteResearchFinding(equipmentId: string, findingId: stri
   await request<void>(`/api/v1/equipment/${encodeURIComponent(equipmentId)}/research-findings/${encodeURIComponent(findingId)}`, {
     method: 'DELETE',
   });
+}
+
+/* --- Research sources, plans, runs and the queue --------------------------- */
+
+export async function listResearchProviders(): Promise<ResearchProvider[]> {
+  const payload = await request<{ providers: ResearchProvider[] }>('/api/v1/providers');
+  return payload.providers ?? [];
+}
+
+export async function saveResearchProviderKey(providerId: string, key: string): Promise<ResearchProvider> {
+  const payload = await request<{ provider: ResearchProvider }>(`/api/v1/providers/${encodeURIComponent(providerId)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ key }),
+  });
+  return payload.provider;
+}
+
+export async function clearResearchProviderKey(providerId: string): Promise<ResearchProvider> {
+  const payload = await request<{ provider: ResearchProvider }>(`/api/v1/providers/${encodeURIComponent(providerId)}`, {
+    method: 'DELETE',
+  });
+  return payload.provider;
+}
+
+/* One cheap call to the service. An honest answer matters more than a green one: a key that is
+   present but refused is worse than no key, because a run would fail later for a hidden reason. */
+export async function testResearchProvider(providerId: string): Promise<{ status: string; detail: string }> {
+  return request(`/api/v1/providers/${encodeURIComponent(providerId)}/test`, { method: 'POST' });
+}
+
+export async function getResearchPlan(equipmentId: string): Promise<ResearchPlan> {
+  const payload = await request<{ plan: ResearchPlan }>(`/api/v1/research/plan?equipment_id=${encodeURIComponent(equipmentId)}`);
+  return payload.plan;
+}
+
+export async function startResearchRun(equipmentId: string): Promise<ResearchRun> {
+  const payload = await request<{ run: ResearchRun }>(`/api/v1/equipment/${encodeURIComponent(equipmentId)}/research/run`, {
+    method: 'POST',
+    body: JSON.stringify({ mode: 'planned' }),
+  });
+  return payload.run;
+}
+
+export async function getResearchRun(runId: string): Promise<ResearchRun> {
+  const payload = await request<{ run: ResearchRun }>(`/api/v1/research/runs/${encodeURIComponent(runId)}`);
+  return payload.run;
+}
+
+export async function listResearchRuns(): Promise<ResearchRun[]> {
+  const payload = await request<{ runs: ResearchRun[] }>('/api/v1/research/runs');
+  return payload.runs ?? [];
+}
+
+export async function getResearchQueue(): Promise<ResearchFinding[]> {
+  const payload = await request<{ findings: ResearchFinding[] }>('/api/v1/research/queue');
+  return payload.findings ?? [];
+}
+
+export async function approveFindings(ids: string[]): Promise<{ approved: number }> {
+  return request('/api/v1/research/queue/approve', { method: 'POST', body: JSON.stringify({ ids }) });
+}
+
+export async function getResearchCoverage(): Promise<{ devices: CoverageRow[]; totals: Record<string, number> }> {
+  return request('/api/v1/research/coverage');
 }
 
 export function getApiBaseUrl(): string {

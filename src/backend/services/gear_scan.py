@@ -185,6 +185,16 @@ def _confidence(value: object) -> Optional[float]:
     return number if 0.0 <= number <= 1.0 else None
 
 
-def _key(name: str, manufacturer: str, model: Optional[str]) -> str:
+def device_key(name: str, manufacturer: str, model: Optional[str]) -> str:
+    """The comparable form of a device's identity: letters and digits, case-folded.
+
+    Public because it is the matching rule the phone capture flow, the research runs and — via
+    docs/INTEGRATION.md — the studio console all have to agree on, so that "the same device" means
+    one thing.
+    """
     text = f"{manufacturer} {model}" if model else name
     return re.sub(r"[^0-9a-z]+", "", text.casefold())
+
+
+def _key(name: str, manufacturer: str, model: Optional[str]) -> str:
+    return device_key(name, manufacturer, model)
