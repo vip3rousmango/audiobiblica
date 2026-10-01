@@ -7,7 +7,55 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Send your devices to EasySchematic the way you actually own them.** Every device's details got a
+  **Send to EasySchematic** panel: it proposes the closest device kind and a starting set of ports
+  (an interface starts with two inputs, an output, headphones and the computer link), and you draw
+  the sockets it really has — connector, signal, direction — from the same list EasySchematic
+  itself uses. One click saves the JSON its own import accepts, so an M1 laptop goes in as a laptop
+  with a laptop's I/O, not as the nearest "Mac Mini". Settings gained an **EasySchematic** section:
+  it names what is running next door, has a **Send the whole catalog** one-file export, and, when no
+  EasySchematic is there, offers one command that installs it — a command that checks first and
+  never installs a second copy on top of an existing one.
+- The assistant and agents can do the same: two new MCP tools — `easyschematic_status` and
+  `easyschematic_export_devices` — mirror the panel.
+
+### Changed
+
+- EasySchematic joined the Service information screen's probed list with the same container-aware
+  check as everything else.
+
+### Known limits, said plainly
+
+- EasySchematic's own agent bridge cannot set ports (its Beta says so), and writing into its shared
+  library is gated. The file path this release uses is the one that carries real ports; the
+  panel says all of this instead of pretending otherwise.
+
+## [0.1.8] - 2026-10-01
+
+### Added
+
+- **Settings gained a Service information screen.** What is running on this computer — the app, the
+  built interface, the assistant and its chosen model, the photo reader, the MCP server, the
+  self-updater, the research sources, and EasySchematic — each named with an honest status and the
+  address it was found on or is expected at. It also shows the address to open this catalog on this
+  computer, the pairing link a phone captures, and every path AudioBiblica reads or writes (the
+  database, manuals, photos, backups, logs) with a copy button. It answers "which address do I open
+  on my phone" and "is my updater actually running" without a terminal.
+- The EasySchematic check in that screen looks at `host.docker.internal` as well as `localhost`,
+  because the app runs in a container — the first version of the check reported a running
+  EasySchematic as absent.
+
+### Fixed
+
+- The research panel's summary counts ran together ("0 fully documented⚠" against "1 missing a
+  manual"). They are a spaced row now.
+- The plan headline was not a sentence: "8 steps for a Microphone — 1 need a key" is now "8 steps
+  for a Microphone — two of them need a key", with the article and plural handled properly ("an
+  Interface", "1 device").
+- Small type was exactly too small. Chips and step metadata sat near 10 px, the threshold where
+  reading turns into squinting; they moved up about a point.
 
 ## [0.1.7] - 2026-09-30
 
@@ -219,6 +267,7 @@ First public release.
 
 [Unreleased]: https://github.com/vip3rousmango/audiobiblica/compare/v0.1.7...HEAD
 [0.1.7]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.7
+[0.1.8]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.8
 [0.1.6]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.6
 [0.1.5]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.5
 [0.1.4]: https://github.com/vip3rousmango/audiobiblica/releases/tag/v0.1.4
